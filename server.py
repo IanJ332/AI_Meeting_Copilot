@@ -43,7 +43,8 @@ def refresh_suggestions():
     session_id = data.get("session_id")
     
     # 1. generate payload
-    input_data = store.generate_input_payload(session_id, refresh_mode="manual")
+    refresh_mode = data.get("refresh_mode", "manual")
+    input_data = store.generate_input_payload(session_id, refresh_mode=refresh_mode)
     session_data = store.get_session(session_id)
     
     # 2. Run wrapper

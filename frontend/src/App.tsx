@@ -26,6 +26,7 @@ interface Batch {
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  timestamp: string;
   details?: any;
 }
 
@@ -107,17 +108,17 @@ function App() {
   // Auto-refresh loop
   useEffect(() => {
     let autoInterval: ReturnType<typeof setInterval>;
-    if (autoRefresh && sessionId) {
+    if (autoRefresh && micActive && sessionId) {
       autoInterval = setInterval(() => {
-        handleRefresh();
+        handleRefresh("auto");
       }, mockCadenceSeconds * 1000);
     }
     return () => {
       if (autoInterval) clearInterval(autoInterval);
     };
-  }, [autoRefresh, sessionId, mockCadenceSeconds]);
+  }, [autoRefresh, micActive, sessionId, mockCadenceSeconds]);
 
-  const handleRefresh = async () => {
+  const handleRefresh = async (mode: "auto" | "manual" = "manual") => {
     if (!sessionId) return;
     setIsLoading(true);
     setExportState(null);
@@ -125,7 +126,10 @@ function App() {
       const res = await fetch(`${API_BASE}/suggestions/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId })
+        body: JSON.stringify({ 
+          session_id: sessionId,
+          refresh_mode: mode 
+        })
       });
       const data = await res.json();
       if (data.status === "not-ready") {
@@ -143,7 +147,11 @@ function App() {
     if (!sessionId) return;
     
     // Add to chat immediately
-    setChat(prev => [...prev, { role: 'user', content: `[Clicked Suggestion]: ${suggestion.preview}` }]);
+    setChat(prev => [...prev, { 
+      role: 'user', 
+      content: `[Clicked Suggestion]: ${suggestion.preview}`,
+      timestamp: new Date().toISOString()
+    }]);
     
     try {
       const res = await fetch(`${API_BASE}/suggestions/click`, {
@@ -164,7 +172,12 @@ function App() {
 
 This response represents what the real detail-engine will generate once Phase E connects the API up.
          `;
-         setChat(prev => [...prev, { role: 'assistant', content: mockExpansion, details: handoffObj }]);
+         setChat(prev => [...prev, { 
+           role: 'assistant', 
+           content: mockExpansion, 
+           timestamp: new Date().toISOString(),
+           details: handoffObj 
+         }]);
       }, 500);
       
     } catch (err) {
