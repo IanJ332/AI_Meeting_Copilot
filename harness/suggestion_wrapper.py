@@ -55,20 +55,19 @@ class SuggestionWrapper:
         return self._make_llm_call_with_retry(messages, session_data)
         
     def _make_llm_call_with_retry(self, messages: list, session_data: dict, attempt: int = 1) -> dict:
-        if not self.client:
-            # Fallback to a mock for local testing without API Key
-            print("WARNING: GROQ_API_KEY not provided. Returning mock response.")
-            return self._mock_response(messages)
-            
         try:
-            response = self.client.chat.completions.create(
-                messages=messages,
-                model=self.model,
-                temperature=0.4, # Low temperature for more deterministic/logical outputs
-                response_format={"type": "json_object"}
-            )
-            raw_text = response.choices[0].message.content
-            output_json = self._extract_json(raw_text)
+            if not self.client:
+                print("WARNING: GROQ_API_KEY not provided. Returning mock response.")
+                output_json = self._mock_response(messages)
+            else:
+                response = self.client.chat.completions.create(
+                    messages=messages,
+                    model=self.model,
+                    temperature=0.4, # Low temperature for more deterministic/logical outputs
+                    response_format={"type": "json_object"}
+                )
+                raw_text = response.choices[0].message.content
+                output_json = self._extract_json(raw_text)
             
             # Validation
             is_valid, val_err = self.validator.validate_output(output_json)

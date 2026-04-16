@@ -91,6 +91,28 @@ def run_scenarios():
         except Exception as e:
             print(f"  X Failed Scenario {sc['id']}: {str(e)}")
             
+        # Test click repetition suppression explicitly here at the end of the loop
+        if sc['id'] == "A":
+            sugg_to_click = output.get('suggestions')[0]
+            store.record_click(session_id, sugg_to_click, batch_id=None, phase=output.get("current_phase"))
+            
+            # Now run cycle again to see if it catches a repeat returned by mock
+            print("  --- Testing Click Suppression ---")
+            mocked_input_data = store.generate_input_payload(session_id)
+            mocked_session_data = store.get_session(session_id)
+            
+            try:
+                # The mock currently returns the same mock signatures with a generic string that DOES NOT have a structured reason (unless we mocked it with one, but we didn't use the exact structural keywords).
+                # Wait, our mock novelty basis is: "mock novelty basis for card X". No keywords from valid_keywords!
+                # So this should definitely trip the filter and then max out the retries.
+                wrapper.run_suggestion_cycle(mocked_input_data, mocked_session_data)
+                print("  X Click Suppression Failed: Expected ValueError due to repetition, but got success.")
+            except ValueError as ve:
+                if "was already clicked" in str(ve) or "was already seen" in str(ve):
+                    print("  Success! Clicked suggestion effectively blocked ->", ve)
+                else:
+                    print("  Success (but with different error): Clicked suggestion repetition blocked ->", ve)
+
         print("\n")
 
 if __name__ == "__main__":

@@ -46,10 +46,16 @@ class SessionStore:
             })
         session["previous_suggestion_batches"].append(batch)
         
-    def record_click(self, session_id: str, suggestion_id: str):
+    def record_click(self, session_id: str, suggestion: dict, batch_id: str = None, phase: str = None):
         session = self.get_session(session_id)
         session["clicked_suggestions"].append({
-            "suggestion_id": suggestion_id,
+            "suggestion_id": suggestion.get("id"),
+            "topic_signature": suggestion.get("topic_signature"),
+            "preview": suggestion.get("preview"),
+            "expand_seed": suggestion.get("expand_seed"),
+            "based_on": suggestion.get("based_on", []),
+            "phase": phase,
+            "batch_id": batch_id,
             "clicked_at": datetime.datetime.utcnow().isoformat() + "Z"
         })
         
@@ -84,6 +90,12 @@ class SessionStore:
             "transcript_recent": recent,
             "transcript_session_summary": summary,
             "previous_suggestion_batches": session["previous_suggestion_batches"],
-            "clicked_suggestions": session["clicked_suggestions"],
+            "clicked_suggestions": [
+                {
+                    "suggestion_id": c["suggestion_id"], 
+                    "clicked_at": c["clicked_at"]
+                }
+                for c in session["clicked_suggestions"]
+            ],
             "full_transcript_available": True
         }
