@@ -116,7 +116,7 @@ class SuggestionWrapper:
                     "preview": "Mock preview 1 with sufficient length",
                     "why_now": "Mock why now because we are testing",
                     "based_on": ["mock basis"],
-                    "topic_signature": "mock_sig_1",
+                    "topic_signature": f"mock_sig_1_{str(uuid.uuid4())[:8]}",
                     "novelty_basis": "mock novelty basis for card 1",
                     "expand_seed": "mock seed 1",
                     "confidence": 0.9
@@ -127,7 +127,7 @@ class SuggestionWrapper:
                     "preview": "Mock preview 2 with sufficient length",
                     "why_now": "Mock why now because we are testing",
                     "based_on": ["mock basis"],
-                    "topic_signature": "mock_sig_2",
+                    "topic_signature": f"mock_sig_2_{str(uuid.uuid4())[:8]}",
                     "novelty_basis": "mock novelty basis for card 2",
                     "expand_seed": "mock seed 2",
                     "confidence": 0.8
@@ -138,7 +138,7 @@ class SuggestionWrapper:
                     "preview": "Mock preview 3 with sufficient length",
                     "why_now": "Mock why now because we are testing",
                     "based_on": ["mock basis"],
-                    "topic_signature": "mock_sig_3",
+                    "topic_signature": f"mock_sig_3_{str(uuid.uuid4())[:8]}",
                     "novelty_basis": "mock novelty basis for card 3",
                     "expand_seed": "mock seed 3",
                     "confidence": 0.85

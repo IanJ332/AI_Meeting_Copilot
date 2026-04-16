@@ -44,6 +44,8 @@ function App() {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [exportState, setExportState] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const isRefreshing = useRef(false);
   
   // Settings
   const [mockCadenceSeconds, setMockCadenceSeconds] = useState(30);
@@ -119,9 +121,13 @@ function App() {
   }, [autoRefresh, micActive, sessionId, mockCadenceSeconds]);
 
   const handleRefresh = async (mode: "auto" | "manual" = "manual") => {
-    if (!sessionId) return;
+    if (!sessionId || isRefreshing.current) return;
+    
+    isRefreshing.current = true;
     setIsLoading(true);
     setExportState(null);
+    setRefreshError(null);
+    
     try {
       const res = await fetch(`${API_BASE}/suggestions/refresh`, {
         method: "POST",
@@ -132,15 +138,22 @@ function App() {
         })
       });
       const data = await res.json();
-      if (data.status === "not-ready") {
+      
+      if (data.error) {
+        setRefreshError(data.error);
+        console.error("Refresh error:", data.error);
+      } else if (data.status === "not-ready") {
         console.log("Harness not ready:", data.message);
       } else if (data.suggestions) {
          setBatches(prev => [{ phase: data.current_phase, suggestions: data.suggestions, timestamp: new Date().toLocaleTimeString() }, ...prev]);
       }
     } catch (err) {
+      setRefreshError("Connection failed");
       console.error(err);
+    } finally {
+      setIsLoading(false);
+      isRefreshing.current = false;
     }
-    setIsLoading(false);
   };
 
   const handleSuggestionClick = async (suggestion: Suggestion) => {
@@ -258,6 +271,11 @@ This response represents what the real detail-engine will generate once Phase E 
               </button>
             </div>
           </div>
+          {refreshError && (
+            <div style={{padding: '0.5rem 1.5rem', background: 'rgba(239,68,68,0.1)', fontSize: '0.8rem', color: '#fca5a5', borderBottom: '1px solid rgba(239,68,68,0.2)'}}>
+              ⚠ {refreshError}
+            </div>
+          )}
           <div className="column-body">
             {batches.length === 0 && <div className="placeholder-text">{transcript.length === 0 ? "Not ready. Add transcript first." : "Click Refresh to generate suggestions based on recent context..."}</div>}
             {batches.map((batch, idx) => (
