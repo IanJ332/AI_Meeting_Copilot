@@ -53,26 +53,36 @@ class SessionStore:
             "clicked_at": datetime.datetime.utcnow().isoformat() + "Z"
         })
         
-    def generate_input_payload(self, session_id: str, refresh_mode="auto"):
+    def generate_input_payload(self, session_id: str, refresh_mode="auto", recent_window_seconds=30):
         session = self.get_session(session_id)
-        # Construct payload adhering to suggestion-input.schema.json
-        # Handle cases where transcript_recent is empty (schema minItems=1)
-        transcript = session["transcript_recent"]
-        if not transcript:
-            now = datetime.datetime.utcnow().isoformat() + "Z"
-            transcript = [{
-                "chunk_id": "dummy",
-                "speaker": "System",
-                "start_ts": now,
-                "end_ts": now,
-                "text": "..."
-            }]
-            
+        
+        now_dt = datetime.datetime.utcnow()
+        recent = []
+        old = []
+        
+        for chunk in session["transcript_recent"]:
+            ts_str = chunk["end_ts"].replace("Z", "+00:00")
+            try:
+                chunk_time = datetime.datetime.fromisoformat(ts_str).replace(tzinfo=None)
+                age = (now_dt - chunk_time).total_seconds()
+                if age <= recent_window_seconds:
+                    recent.append(chunk)
+                else:
+                    old.append(chunk)
+            except Exception:
+                recent.append(chunk)
+
+        session["transcript_recent"] = recent
+        session["transcript_old"].extend(old)
+        
+        summary = " ".join([c["text"] for c in session["transcript_old"]])
+
         return {
             "current_time": datetime.datetime.utcnow().isoformat() + "Z",
             "refresh_mode": refresh_mode,
-            "recent_window_seconds": 30,
-            "transcript_recent": transcript,
+            "recent_window_seconds": recent_window_seconds,
+            "transcript_recent": recent,
+            "transcript_session_summary": summary,
             "previous_suggestion_batches": session["previous_suggestion_batches"],
             "clicked_suggestions": session["clicked_suggestions"],
             "full_transcript_available": True

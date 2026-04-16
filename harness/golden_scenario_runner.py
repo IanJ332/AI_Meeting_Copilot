@@ -58,17 +58,38 @@ def run_scenarios():
         try:
             output = wrapper.run_suggestion_cycle(input_data, session_data)
             
-            print(f"Success! Detected Phase: {output.get('current_phase')}")
-            for i, sugg in enumerate(output.get('suggestions', [])):
-                print(f"  Suggestion {i+1} [{sugg['type']}]:")
-                print(f"    Preview: {sugg['preview']}")
-                print(f"    Signature: {sugg['topic_signature']}")
+            if "status" in output and output["status"] == "not-ready":
+                print("  Skipped: Not ready.")
+                continue
+                
+            assert "suggestions" in output, "Missing suggestions array"
+            assert "current_phase" in output, "Missing current_phase"
+            
+            assert len(output["suggestions"]) == 3, f"Expected 3 suggestions, got {len(output['suggestions'])}"
+            
+            # Assert phase matches expected
+            # Note: with a mocked LLM this may fail, which is correct behavior for a mock.
+            assert output["current_phase"] == sc["phase"], f"Phase mismatch: expected {sc['phase']}, got {output['current_phase']}"
+            
+            # Assert no duplicates
+            sigs = [s["topic_signature"] for s in output["suggestions"]]
+            assert len(sigs) == len(set(sigs)), "Duplicate topic_signature found in output batch"
+            
+            # Fail on obvious generic filler
+            for s in output["suggestions"]:
+                prev = s["preview"].lower()
+                assert "summarize the discussion" not in prev, "Generic filler 'summarize the discussion' found"
+                assert "ask a follow-up question" not in prev, "Generic filler 'ask a follow-up' found"
+            
+            print(f"  Success! Assertions passed for Phase: {output.get('current_phase')}")
             
             # Save batch to store as if it was shown
             store.add_batch(session_id, output.get('current_phase'), output.get('suggestions'))
             
+        except AssertionError as e:
+            print(f"  X Assertion Failed Scenario {sc['id']}: {str(e)}")
         except Exception as e:
-            print(f"X Failed Scenario {sc['id']}: {str(e)}")
+            print(f"  X Failed Scenario {sc['id']}: {str(e)}")
             
         print("\n")
 

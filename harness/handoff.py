@@ -8,14 +8,27 @@ class ClickHandoff:
         Provides the detailed-answer engine what it needs: 
         the seed query, the context timestamps, and the suggestion id.
         """
-        # Grab timestamps of recent transcript context
         context_timestamps = [
             chunk["start_ts"] for chunk in session_data.get("transcript_recent", [])
         ]
         
+        batch_id = "none_available"
+        phase = session_data.get("current_phase", "unknown")
+        
+        for batch in session_data.get("previous_suggestion_batches", []):
+            for s in batch.get("suggestions", []):
+                if s.get("id") == suggestion.get("id"):
+                    batch_id = batch.get("batch_id")
+                    phase = batch.get("phase")
+                    break
+        
         return {
             "suggestion_id": suggestion.get("id"),
+            "batch_id": batch_id,
+            "preview": suggestion.get("preview"),
             "expand_seed": suggestion.get("expand_seed"),
+            "based_on": suggestion.get("based_on", []),
+            "phase": phase,
             "clicked_at": datetime.datetime.utcnow().isoformat() + "Z",
             "context_snapshot_timestamps": context_timestamps
         }
