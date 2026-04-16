@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 
-// Types matched to our python output
+// Interfaces
 interface TranscriptItem {
   text: string;
   speaker: string;
@@ -26,6 +26,7 @@ interface Batch {
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  details?: any;
 }
 
 const API_BASE = "http://127.0.0.1:5000/api";
@@ -36,8 +37,24 @@ function App() {
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [chat, setChat] = useState<ChatMessage[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   
+  // UI States
+  const [isLoading, setIsLoading] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [exportState, setExportState] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  
+  // Settings
+  const [mockCadenceSeconds, setMockCadenceSeconds] = useState(30);
+  const [settings, setSettings] = useState({
+    groqApiKey: '', // Managed via .env or Browser Settings
+    livePrompt: 'Extract actionable suggestions...',
+    detailPrompt: 'Expand the specific point...',
+    chatPrompt: 'You are a helpful copilot...',
+    liveContextWindow: 30,
+    detailContextWindow: 180
+  });
+
   const transcriptEndRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -49,15 +66,9 @@ function App() {
       .catch(err => console.error("Could not init session:", err));
   }, []);
 
-  // Auto-scroll transcript
-  useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [transcript]);
-
-  // Auto-scroll chat
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chat]);
+  // Auto-scrolls
+  useEffect(() => transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' }), [transcript]);
+  useEffect(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), [chat]);
 
   // Mock Mic Loop
   useEffect(() => {
@@ -71,7 +82,7 @@ function App() {
         "RAG is cheaper, but fine-tuning may be more consistent.",
         "Legal says we can't send customer data to a new external vendor."
       ];
-      let i = 0;
+      let i = transcript.length;
       
       interval = setInterval(() => {
         const text = mockPhrases[i % mockPhrases.length];
@@ -86,16 +97,30 @@ function App() {
             text, speaker: "User", chunk_id: Math.random().toString(), start_ts: new Date().toISOString(), end_ts: new Date().toISOString()
           }]);
         });
-      }, 4000); 
+      }, mockCadenceSeconds * 1000); 
     }
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [micActive, sessionId]);
+  }, [micActive, sessionId, mockCadenceSeconds, transcript.length]);
+
+  // Auto-refresh loop
+  useEffect(() => {
+    let autoInterval: ReturnType<typeof setInterval>;
+    if (autoRefresh && sessionId) {
+      autoInterval = setInterval(() => {
+        handleRefresh();
+      }, mockCadenceSeconds * 1000);
+    }
+    return () => {
+      if (autoInterval) clearInterval(autoInterval);
+    };
+  }, [autoRefresh, sessionId, mockCadenceSeconds]);
 
   const handleRefresh = async () => {
     if (!sessionId) return;
     setIsLoading(true);
+    setExportState(null);
     try {
       const res = await fetch(`${API_BASE}/suggestions/refresh`, {
         method: "POST",
@@ -128,97 +153,213 @@ function App() {
       });
       const handoffObj = await res.json();
       
-      // Mock detailed answer expanding on the seed via Right Rail
+      // Right-panel mock grounding improvement
       setTimeout(() => {
-         setChat(prev => [...prev, { 
-           role: 'assistant', 
-           content: `Here is the expanded answer to your clicked suggestion based on the seed: "${handoffObj.expand_seed}". (This is a mock expansion.)` 
-         }]);
-      }, 800);
+         const mockExpansion = `
+**Phase Detected:** ${handoffObj.phase}
+**Grounding Cues:** ${handoffObj.based_on?.join(" | ") || "Recent context"}
+
+*System detail-generation executed based on seed*: 
+> "${handoffObj.expand_seed}"
+
+This response represents what the real detail-engine will generate once Phase E connects the API up.
+         `;
+         setChat(prev => [...prev, { role: 'assistant', content: mockExpansion, details: handoffObj }]);
+      }, 500);
       
     } catch (err) {
       console.error(err);
     }
   };
 
+  const exportSession = () => {
+    try {
+      const exportData = {
+        session_id: sessionId,
+        exported_at: new Date().toISOString(),
+        settings_snapshot: settings,
+        transcript,
+        rendered_batches: batches,
+        chat_history: chat
+      };
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `twinmind-mock-session-${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setExportState("Success");
+    } catch(err) {
+      console.error(err);
+      setExportState("Failed");
+    }
+  };
+
   return (
-    <div className="app-container">
-      {/* LEFT COLUMN: Transcript */}
-      <div className="column">
-        <div className="column-header">
-          <span>Live Transcript</span>
-          <button 
-            className={micActive ? 'danger' : 'primary'} 
-            onClick={() => setMicActive(!micActive)}
-          >
-            {micActive ? 'Stop Mic' : 'Start Mic (Mock)'}
-          </button>
-        </div>
-        <div className="column-body">
-          {transcript.length === 0 && <div style={{opacity: 0.5, textAlign: 'center', marginTop: '2rem'}}>Transcript will stream here when mic is active...</div>}
-          {transcript.map(t => (
-            <div className="transcript-line" key={t.chunk_id}>
-              <span className="timestamp">{new Date(t.start_ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}</span>
-              <span className="speaker">{t.speaker}:</span>
-              <span>{t.text}</span>
+    <>
+      <div className="app-container">
+        {/* LEFT COLUMN: Transcript */}
+        <div className="column">
+          <div className="column-header">
+            <span>Live Transcript</span>
+            <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center'}}>
+              {micActive && <span className="blinking-dot"></span>}
+              <button className={micActive ? 'danger' : 'primary'} onClick={() => setMicActive(!micActive)}>
+                {micActive ? 'Stop Mic' : 'Start Mic (Mock)'}
+              </button>
             </div>
-          ))}
-          <div ref={transcriptEndRef} />
+          </div>
+          <div className="column-body">
+            {transcript.length === 0 && <div className="placeholder-text">Transcript will stream here when mic is active...</div>}
+            {transcript.map(t => (
+              <div className="transcript-line" key={t.chunk_id}>
+                <span className="timestamp">{new Date(t.start_ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}</span>
+                <span className="speaker">{t.speaker}:</span>
+                <span>{t.text}</span>
+              </div>
+            ))}
+            <div ref={transcriptEndRef} />
+          </div>
+          <div style={{padding: '0.5rem 1rem', background: 'rgba(0,0,0,0.2)', fontSize: '0.8rem', color: '#9aa0a6'}}>
+            Mock Cadence logic: chunk every {mockCadenceSeconds}s
+          </div>
+        </div>
+
+        {/* MIDDLE COLUMN: Suggestions */}
+        <div className="column">
+          <div className="column-header">
+            <span style={{display:'flex', alignItems:'center', gap:'0.5rem'}}>
+              Live Suggestions 
+              {autoRefresh && <span className="badge">Auto-Refresh ON</span>}
+            </span>
+            <div style={{display: 'flex', gap: '0.5rem'}}>
+              <button 
+                onClick={() => setAutoRefresh(!autoRefresh)}
+                style={{borderColor: autoRefresh ? '#10b981' : undefined, color: autoRefresh ? '#10b981' : undefined}}
+              >
+                {autoRefresh ? `Auto (${mockCadenceSeconds}s)` : 'Enable Auto'}
+              </button>
+              <button className="primary" onClick={handleRefresh} disabled={isLoading}>
+                {isLoading ? 'Thinking...' : 'Manual Refresh'}
+              </button>
+            </div>
+          </div>
+          <div className="column-body">
+            {batches.length === 0 && <div className="placeholder-text">{transcript.length === 0 ? "Not ready. Add transcript first." : "Click Refresh to generate suggestions based on recent context..."}</div>}
+            {batches.map((batch, idx) => (
+              <div key={idx} style={{marginBottom: '1rem'}}>
+                {idx !== 0 && (
+                  <div className="batch-divider">
+                    <span>Older ({batch.timestamp})</span>
+                  </div>
+                )}
+                {batch.suggestions.map(s => (
+                  <div 
+                    key={s.id} 
+                    className="suggestion-card"
+                    onClick={() => handleSuggestionClick(s)}
+                    style={{ marginBottom: '1rem' }}
+                  >
+                    <div className="suggestion-type">{s.type.replace('_', ' ')}</div>
+                    <div className="suggestion-preview">{s.preview}</div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* RIGHT COLUMN: Chat */}
+        <div className="column">
+          <div className="column-header">
+            <span>Detailed Chat Dashboard</span>
+            <div style={{display: 'flex', gap: '0.5rem'}}>
+              <button onClick={() => setShowSettings(true)}>⚙️ Settings</button>
+              <button onClick={exportSession}>⬇ Export Mock</button>
+            </div>
+          </div>
+          {exportState && (
+            <div style={{padding: '0.5rem 1.5rem', background: exportState==='Success'?'rgba(16,185,129,0.2)':'rgba(239,68,68,0.2)', fontSize: '0.8rem', color: '#fff', textAlign: 'center'}}>
+              Export {exportState}
+            </div>
+          )}
+          <div className="column-body">
+            {chat.length === 0 && <div className="placeholder-text">Click any suggestion to expand its details here.</div>}
+            {chat.map((msg, i) => (
+              <div key={i} className={`chat-message ${msg.role}`}>
+                <strong className={`chat-role ${msg.role}`}>
+                  {msg.role === 'user' ? 'You' : 'TwinMind Copilot'}
+                </strong>
+                <div style={{whiteSpace: 'pre-wrap', marginTop: '0.5rem'}}>{msg.content}</div>
+              </div>
+            ))}
+            <div ref={chatEndRef} />
+          </div>
         </div>
       </div>
 
-      {/* MIDDLE COLUMN: Suggestions */}
-      <div className="column">
-        <div className="column-header">
-          <span>Live Suggestions</span>
-          <button className="primary" onClick={handleRefresh} disabled={isLoading}>
-            {isLoading ? 'Thinking...' : 'Refresh'}
-          </button>
-        </div>
-        <div className="column-body">
-          {batches.length === 0 && <div style={{opacity: 0.5, textAlign: 'center', marginTop: '2rem'}}>Click Refresh to generate suggestions based on recent context...</div>}
-          {batches.map((batch, idx) => (
-            <div key={idx} style={{marginBottom: '1rem'}}>
-              {idx !== 0 && (
-                <div className="batch-divider">
-                  <span>Older ({batch.timestamp})</span>
-                </div>
-              )}
-              {batch.suggestions.map(s => (
-                <div 
-                  key={s.id} 
-                  className="suggestion-card"
-                  onClick={() => handleSuggestionClick(s)}
-                  style={{ marginBottom: '1rem' }}
-                >
-                  <div className="suggestion-type">{s.type.replace('_', ' ')}</div>
-                  <div className="suggestion-preview">{s.preview}</div>
-                </div>
-              ))}
+      {/* SETTINGS MODAL */}
+      {showSettings && (
+        <div className="modal-overlay">
+          <div className="modal-content column">
+            <div className="column-header" style={{height: 'auto', padding: '1rem 1.5rem'}}>
+              <span>TwinMind Settings (Shell)</span>
+              <button className="danger" onClick={() => setShowSettings(false)}>X</button>
             </div>
-          ))}
-        </div>
-      </div>
+            <div className="column-body">
+               <label>Groq API Key (Placeholder)</label>
+               <input 
+                 className="settings-input" 
+                 type="text" 
+                 value={settings.groqApiKey} 
+                 onChange={e => setSettings({...settings, groqApiKey: e.target.value})} 
+               />
+               
+               <label>Mock Transcript Cadence (Seconds)</label>
+               <input 
+                 className="settings-input" 
+                 type="number" 
+                 value={mockCadenceSeconds} 
+                 onChange={e => setMockCadenceSeconds(Number(e.target.value))} 
+               />
 
-      {/* RIGHT COLUMN: Chat */}
-      <div className="column">
-        <div className="column-header">
-          <span>Detailed Chat Dashboard</span>
-        </div>
-        <div className="column-body">
-          {chat.length === 0 && <div style={{opacity: 0.5, textAlign: 'center', marginTop: '2rem'}}>Click any suggestion to expand its details here.</div>}
-          {chat.map((msg, i) => (
-            <div key={i} className={`chat-message ${msg.role}`}>
-              <strong style={{color: msg.role === 'user' ? '#a78bfa' : '#34d399', display: 'block', marginBottom: '0.4rem'}}>
-                {msg.role === 'user' ? 'You' : 'TwinMind Copilot'}
-              </strong>
-              <div>{msg.content}</div>
+               <label>Live Suggestion Prompt</label>
+               <textarea 
+                 className="settings-input"
+                 rows={3}
+                 value={settings.livePrompt}
+                 onChange={e => setSettings({...settings, livePrompt: e.target.value})}
+               />
+
+               <label>Detail Answer Prompt</label>
+               <textarea 
+                 className="settings-input"
+                 rows={2}
+                 value={settings.detailPrompt}
+                 onChange={e => setSettings({...settings, detailPrompt: e.target.value})}
+               />
+
+               <div style={{display:'flex', gap:'1rem'}}>
+                 <div style={{flex:1}}>
+                   <label>Context Window (Live, secs)</label>
+                   <input className="settings-input" type="number" value={settings.liveContextWindow} onChange={e => setSettings({...settings, liveContextWindow: Number(e.target.value)})} />
+                 </div>
+                 <div style={{flex:1}}>
+                   <label>Context Window (Chat, secs)</label>
+                   <input className="settings-input" type="number" value={settings.detailContextWindow} onChange={e => setSettings({...settings, detailContextWindow: Number(e.target.value)})} />
+                 </div>
+               </div>
+
+               <div style={{textAlign: 'right', marginTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1rem'}}>
+                  <span style={{marginRight: '1rem', color: '#10b981', fontSize: '0.85rem'}}>⚙️ Shell state saved locally</span>
+                  <button className="primary" onClick={() => setShowSettings(false)}>Done</button>
+               </div>
             </div>
-          ))}
-          <div ref={chatEndRef} />
+          </div>
         </div>
-      </div>
-    </div>
+      )}
+    </>
   );
 }
 
