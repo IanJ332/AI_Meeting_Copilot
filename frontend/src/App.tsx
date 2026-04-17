@@ -138,7 +138,13 @@ function App() {
           settings: settings
         })
       });
+      
+      if (!res.ok) {
+         throw new Error(`API Error ${res.status}: ${res.statusText}`);
+      }
+      
       const data = await res.json();
+      console.log("Suggestions API response:", data);
       
       if (data.error) {
         setRefreshError(data.error);
@@ -148,10 +154,12 @@ function App() {
       } else if (data.suggestions) {
          setRefreshError(null);
          setBatches(prev => [{ phase: data.current_phase, suggestions: data.suggestions, timestamp: new Date().toLocaleTimeString() }, ...prev]);
+      } else {
+         throw new Error("Invalid response schema: missing suggestions array");
       }
-    } catch (err) {
-      setRefreshError("Connection failed");
-      console.error(err);
+    } catch (err: any) {
+      setRefreshError(err.message || JSON.stringify(err));
+      console.error("Frontend caught error:", err);
     } finally {
       setIsLoading(false);
       isRefreshing.current = false;

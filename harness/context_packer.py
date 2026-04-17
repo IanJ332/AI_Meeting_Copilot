@@ -9,13 +9,13 @@ class ContextPacker:
         with open(PROMPT_PATH, 'r', encoding='utf-8') as f:
             self.system_prompt = f.read()
 
-    def pack(self, input_data: dict) -> list:
+    def pack(self, input_data: dict, settings: dict = None) -> list:
         """
         Takes the input state dict and packs it into the format
         expected by the chat API (e.g., Groq / OpenAI messages).
         """
         system_content = self.system_prompt
-        live_prompt = input_data.get("settings", {}).get("livePrompt")
+        live_prompt = (settings or {}).get("livePrompt")
         if live_prompt:
              system_content += f"\\n\\nUSER CUSTOM INSTRUCTION:\\n{live_prompt}"
 

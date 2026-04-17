@@ -79,13 +79,12 @@ def refresh_suggestions():
     # 1. generate payload
     refresh_mode = data.get("refresh_mode", "manual")
     input_data = store.generate_input_payload(session_id, refresh_mode=refresh_mode)
-    input_data["settings"] = settings
     session_data = store.get_session(session_id)
     
     # 2. Run wrapper
     wrapper = SuggestionWrapper(api_key=api_key)
     try:
-        output = wrapper.run_suggestion_cycle(input_data, session_data)
+        output = wrapper.run_suggestion_cycle(input_data, session_data, settings=settings)
         
         # If not ready, return early
         if output.get("status") == "not-ready":
@@ -100,8 +99,12 @@ def refresh_suggestions():
         
         return jsonify(output)
     except Exception as e:
-        app.logger.error(f"Error generating suggestions: {e}")
-        return jsonify({"error": str(e)}), 500
+        app.logger.exception("Error generating suggestions")
+        return jsonify({
+            "error": str(e),
+            "type": type(e).__name__,
+            "details": "Server encountered an error while processing suggestions"
+        }), 500
 
 @app.route("/api/suggestions/click", methods=["POST"])
 def click_suggestion():

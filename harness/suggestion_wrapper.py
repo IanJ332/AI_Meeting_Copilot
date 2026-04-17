@@ -31,7 +31,7 @@ class SuggestionWrapper:
                 pass
         raise ValueError("Could not extract valid JSON from output.")
 
-    def run_suggestion_cycle(self, input_data: dict, session_data: dict = None) -> dict:
+    def run_suggestion_cycle(self, input_data: dict, session_data: dict = None, settings: dict = None) -> dict:
         """
         Executes the suggestion generation cycle:
         1. Validates input schema
@@ -50,7 +50,7 @@ class SuggestionWrapper:
         if not is_valid:
             raise ValueError(f"Input schema validation failed: {err}")
             
-        messages = self.packer.pack(input_data)
+        messages = self.packer.pack(input_data, settings=settings)
         
         return self._make_llm_call_with_retry(messages, session_data)
         
