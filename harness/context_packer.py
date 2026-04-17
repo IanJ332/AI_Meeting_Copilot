@@ -14,7 +14,12 @@ class ContextPacker:
         Takes the input state dict and packs it into the format
         expected by the chat API (e.g., Groq / OpenAI messages).
         """
+        system_content = self.system_prompt
+        live_prompt = input_data.get("settings", {}).get("livePrompt")
+        if live_prompt:
+             system_content += f"\\n\\nUSER CUSTOM INSTRUCTION:\\n{live_prompt}"
+
         return [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": system_content},
             {"role": "user", "content": json.dumps(input_data, indent=2)}
         ]

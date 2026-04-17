@@ -16,9 +16,41 @@ app = Flask(__name__)
 # Enable CORS for all routes so our Vite frontend can call it
 CORS(app)
 
-# Global session store and wrapper (mock API key used unless environment provides it)
+# Global session store
 store = SessionStore()
-wrapper = SuggestionWrapper(api_key=os.environ.get("GROQ_API_KEY", ""))
+
+def generate_detailed_answer(handoff_obj, session_data, settings, api_key):
+    try:
+        from groq import Groq
+        if not api_key or not Groq:
+            return None # Falls back to mock UI
+            
+        client = Groq(api_key=api_key)
+        
+        detail_prompt = settings.get("detailPrompt", "Expand the specific point...")
+        seed = handoff_obj.get("expand_seed", "")
+        preview = handoff_obj.get("preview", "")
+        
+        # Build prompt
+        context_text = ""
+        for chunk in session_data.get("transcript_recent", []):
+            context_text += f"{chunk['speaker']}: {chunk['text']}\\n"
+            
+        messages = [
+            {"role": "system", "content": f"{detail_prompt}\\n\\nRecent context:\\n{context_text}"},
+            {"role": "user", "content": f"Please expand on this suggestion preview: '{preview}'. Seed instruction: {seed}"}
+        ]
+        
+        response = client.chat.completions.create(
+            model="llama3-70b-8192", 
+            temperature=0.7,
+            messages=messages
+        )
+        return response.choices[0].message.content
+        
+    except Exception as e:
+        app.logger.error(f"Error generating detailed answer: {e}")
+        return None
 
 @app.route("/api/session/start", methods=["POST"])
 def start_session():
@@ -41,13 +73,17 @@ def add_transcript():
 def refresh_suggestions():
     data = request.json
     session_id = data.get("session_id")
+    settings = data.get("settings", {})
+    api_key = settings.get("groqApiKey") or os.environ.get("GROQ_API_KEY", "")
     
     # 1. generate payload
     refresh_mode = data.get("refresh_mode", "manual")
     input_data = store.generate_input_payload(session_id, refresh_mode=refresh_mode)
+    input_data["settings"] = settings
     session_data = store.get_session(session_id)
     
     # 2. Run wrapper
+    wrapper = SuggestionWrapper(api_key=api_key)
     try:
         output = wrapper.run_suggestion_cycle(input_data, session_data)
         
@@ -72,6 +108,8 @@ def click_suggestion():
     data = request.json
     session_id = data.get("session_id")
     suggestion = data.get("suggestion")
+    settings = data.get("settings", {})
+    api_key = settings.get("groqApiKey") or os.environ.get("GROQ_API_KEY", "")
     
     if not session_id or not suggestion:
         return jsonify({"error": "Missing session_id or suggestion"}), 400
@@ -85,8 +123,14 @@ def click_suggestion():
     # Record click to block repetition
     store.record_click(session_id, suggestion, batch_id=handoff_obj.get("batch_id"), phase=handoff_obj.get("phase"))
     
-    # Return handoff object which frontend can use to start chat
-    return jsonify(handoff_obj)
+    # Generate detailed chat response via Real API
+    detail_text = generate_detailed_answer(handoff_obj, session_data, settings, api_key)
+    
+    # Return handoff object alongside detail completion
+    return jsonify({
+        "handoff": handoff_obj,
+        "detail_response": detail_text
+    })
 
 if __name__ == "__main__":
     app.run(port=5000, debug=True)

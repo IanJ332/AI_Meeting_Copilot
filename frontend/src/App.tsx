@@ -134,7 +134,8 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           session_id: sessionId,
-          refresh_mode: mode 
+          refresh_mode: mode,
+          settings: settings
         })
       });
       const data = await res.json();
@@ -145,6 +146,7 @@ function App() {
       } else if (data.status === "not-ready") {
         console.log("Harness not ready:", data.message);
       } else if (data.suggestions) {
+         setRefreshError(null);
          setBatches(prev => [{ phase: data.current_phase, suggestions: data.suggestions, timestamp: new Date().toLocaleTimeString() }, ...prev]);
       }
     } catch (err) {
@@ -170,13 +172,16 @@ function App() {
       const res = await fetch(`${API_BASE}/suggestions/click`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, suggestion })
+        body: JSON.stringify({ session_id: sessionId, suggestion, settings })
       });
-      const handoffObj = await res.json();
+      const data = await res.json();
       
-      // Right-panel mock grounding improvement
-      setTimeout(() => {
-         const mockExpansion = `
+      const handoffObj = data.handoff || data; // Fallback mapping in case backend returns raw
+      let expansionContent = data.detail_response;
+      
+      // Right-panel mock grounding fallback
+      if (!expansionContent) {
+        expansionContent = `
 **Phase Detected:** ${handoffObj.phase}
 **Grounding Cues:** ${handoffObj.based_on?.join(" | ") || "Recent context"}
 
@@ -184,14 +189,15 @@ function App() {
 > "${handoffObj.expand_seed}"
 
 This response represents what the real detail-engine will generate once Phase E connects the API up.
-         `;
-         setChat(prev => [...prev, { 
-           role: 'assistant', 
-           content: mockExpansion, 
-           timestamp: new Date().toISOString(),
-           details: handoffObj 
-         }]);
-      }, 500);
+        `;
+      }
+
+      setChat(prev => [...prev, { 
+        role: 'assistant', 
+        content: expansionContent, 
+        timestamp: new Date().toISOString(),
+        details: handoffObj 
+      }]);
       
     } catch (err) {
       console.error(err);
@@ -266,7 +272,7 @@ This response represents what the real detail-engine will generate once Phase E 
               >
                 {autoRefresh ? `Auto (${mockCadenceSeconds}s)` : 'Enable Auto'}
               </button>
-              <button className="primary" onClick={handleRefresh} disabled={isLoading}>
+              <button className="primary" onClick={() => handleRefresh("manual")} disabled={isLoading}>
                 {isLoading ? 'Thinking...' : 'Manual Refresh'}
               </button>
             </div>
@@ -339,7 +345,7 @@ This response represents what the real detail-engine will generate once Phase E 
               <button className="danger" onClick={() => setShowSettings(false)}>X</button>
             </div>
             <div className="column-body">
-               <label>Groq API Key (Placeholder)</label>
+               <label>Groq API Key (.env or runtime)</label>
                <input 
                  className="settings-input" 
                  type="text" 
