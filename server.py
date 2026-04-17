@@ -33,16 +33,21 @@ def generate_detailed_answer(handoff_obj, session_data, settings, api_key):
         
         # Build prompt
         context_text = ""
+        old_summary = " ".join([c["text"] for c in session_data.get("transcript_old", [])])
+        if old_summary:
+            context_text += f"Full conversation summary (older context):\\n{old_summary}\\n\\n"
+            
+        context_text += "Recent context:\\n"
         for chunk in session_data.get("transcript_recent", []):
             context_text += f"{chunk['speaker']}: {chunk['text']}\\n"
             
         messages = [
-            {"role": "system", "content": f"{detail_prompt}\\n\\nRecent context:\\n{context_text}"},
+            {"role": "system", "content": f"{detail_prompt}\\n\\n{context_text}"},
             {"role": "user", "content": f"Please expand on this suggestion preview: '{preview}'. Seed instruction: {seed}"}
         ]
         
         response = client.chat.completions.create(
-            model="llama3-70b-8192", 
+            model="gpt-oss-120b", 
             temperature=0.7,
             messages=messages
         )

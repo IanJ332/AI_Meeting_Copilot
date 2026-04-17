@@ -49,14 +49,29 @@ function App() {
   
   // Settings
   const [mockCadenceSeconds, setMockCadenceSeconds] = useState(30);
-  const [settings, setSettings] = useState({
-    groqApiKey: '', // Managed via .env or Browser Settings
-    livePrompt: 'Extract actionable suggestions...',
-    detailPrompt: 'Expand the specific point...',
-    chatPrompt: 'You are a helpful copilot...',
-    liveContextWindow: 30,
-    detailContextWindow: 180
+  const [settings, setSettings] = useState(() => {
+    const saved = localStorage.getItem('twinmind_settings');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error("Failed to parse settings", e);
+      }
+    }
+    return {
+      groqApiKey: '', 
+      livePrompt: 'Extract actionable suggestions...',
+      detailPrompt: 'Expand the specific point...',
+      chatPrompt: 'You are a helpful copilot...',
+      liveContextWindow: 30,
+      detailContextWindow: 180
+    };
   });
+
+  // Persist settings to localStorage
+  useEffect(() => {
+    localStorage.setItem('twinmind_settings', JSON.stringify(settings));
+  }, [settings]);
 
   const transcriptEndRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
