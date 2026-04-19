@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import ReactMarkdown from 'react-markdown';
 
 // Interfaces
 interface TranscriptItem {
@@ -28,6 +29,7 @@ interface ChatMessage {
   content: string;
   timestamp: string;
   details?: any;
+  suggestionType?: string;
 }
 
 const API_BASE = "http://127.0.0.1:5000/api";
@@ -187,8 +189,9 @@ function App() {
     // Add to chat immediately
     setChat(prev => [...prev, { 
       role: 'user', 
-      content: `[Clicked Suggestion]: ${suggestion.preview}`,
-      timestamp: new Date().toISOString()
+      content: suggestion.preview,
+      timestamp: new Date().toISOString(),
+      suggestionType: suggestion.type
     }]);
     
     try {
@@ -349,9 +352,11 @@ This response represents what the real detail-engine will generate once Phase E 
             {chat.map((msg, i) => (
               <div key={i} className={`chat-message ${msg.role}`}>
                 <strong className={`chat-role ${msg.role}`}>
-                  {msg.role === 'user' ? 'You' : 'TwinMind Copilot'}
+                  {msg.role === 'user' ? (msg.suggestionType ? `YOU · ${msg.suggestionType.replace('_', ' ').toUpperCase()}` : 'YOU') : 'ASSISTANT'}
                 </strong>
-                <div style={{whiteSpace: 'pre-wrap', marginTop: '0.5rem'}}>{msg.content}</div>
+                <div className="markdown-body" style={{marginTop: '0.5rem'}}>
+                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                </div>
               </div>
             ))}
             <div ref={chatEndRef} />
