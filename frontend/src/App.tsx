@@ -270,7 +270,7 @@ This response represents what the real detail-engine will generate once Phase E 
           </div>
           <div className="column-body">
             {transcript.length === 0 && <div className="placeholder-text">Transcript will stream here when mic is active...</div>}
-            {transcript.map(t => (
+            {transcript.slice(-500).map(t => (
               <div className="transcript-line" key={t.chunk_id}>
                 <span className="timestamp">{new Date(t.start_ts).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})}</span>
                 <span className="speaker">{t.speaker}:</span>

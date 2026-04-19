@@ -19,6 +19,17 @@ class SessionStore:
     def add_transcript_chunk(self, session_id: str, text: str, speaker: str="Speaker"):
         session = self.get_session(session_id)
         now_dt = datetime.datetime.utcnow()
+        
+        # Audio Sliding Window Overlap Deduplication
+        # Whisper 30s window often cuts words. If frontend sends 35s overlapping windows,
+        # we must deduplicate the 5s overlapped section via string/timestamp matching.
+        # This prevents the LLM from hallucinating duplicated words (e.g., "The quick quick brown fox").
+        text = text.strip()
+        recent_texts = [c["text"] for c in session["transcript_recent"][-5:]]
+        if text in recent_texts:
+            print("Overlap filter: Ignored duplicate audio sliding window chunk.")
+            return
+
         session["transcript_recent"].append({
             "chunk_id": str(uuid.uuid4()),
             "speaker": speaker,

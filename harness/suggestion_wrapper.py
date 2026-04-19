@@ -33,12 +33,11 @@ class SuggestionWrapper:
 
     def run_suggestion_cycle(self, input_data: dict, session_data: dict = None, settings: dict = None) -> dict:
         """
-        Executes the suggestion generation cycle:
-        1. Validates input schema
-        2. Packs context into messages
-        3. Calls LLM
-        4. Validates output schema & novelty
-        5. Handles 1 retry on failure
+        Executes the Two-Pass suggestion generation cycle:
+        1. Pass 1: Intent Classification (Routing)
+        2. Pass 2: Generation via Context Packaging
+        3. Validates output schema & novelty
+        4. Handles fallback if strict schema parsing fails
         """
         if not input_data.get("transcript_recent"):
             return {
@@ -50,22 +49,61 @@ class SuggestionWrapper:
         if not is_valid:
             raise ValueError(f"Input schema validation failed: {err}")
             
-        messages = self.packer.pack(input_data, settings=settings)
-        
-        return self._make_llm_call_with_retry(messages, session_data)
-        
-    def _make_llm_call_with_retry(self, messages: list, session_data: dict, attempt: int = 1) -> dict:
+        # Pass 1: Routing Layer
+        routing_messages = self.packer.pack_routing(input_data)
+        intents = self._make_routing_call(routing_messages)
+            
+        # Pass 2: Generation Layer
+        generation_messages = self.packer.pack_suggestion(input_data, intents, settings=settings)
+        return self._make_llm_call_with_fallback(generation_messages, session_data)
+
+    def _make_routing_call(self, messages: list) -> list:
+        if not self.client:
+            return ["fact_check", "question", "insight"] # Mock intent fallback
+            
+        try:
+            response = self.client.chat.completions.create(
+                messages=messages,
+                model=self.model,
+                temperature=0.1,
+                response_format={"type": "json_object"},
+                extra_body={"reasoning_effort": "low"}
+            )
+            raw_text = response.choices[0].message.content
+            output_json = self._extract_json(raw_text)
+            return output_json.get("intents", ["fact_check", "question", "insight"])[:3]
+        except Exception as e:
+            print(f"Routing call failed, falling back: {e}")
+            return ["discussion_point", "question", "insight"]
+
+    def _make_llm_call_with_fallback(self, messages: list, session_data: dict, attempt: int = 1) -> dict:
         try:
             if not self.client:
                 print("WARNING: GROQ_API_KEY not provided. Returning mock response.")
                 output_json = self._mock_response(messages)
             else:
-                response = self.client.chat.completions.create(
-                    messages=messages,
-                    model=self.model,
-                    temperature=0.4, # Low temperature for more deterministic/logical outputs
-                    response_format={"type": "json_object"}
-                )
+                try:
+                    # Attempt Strict Schema mapping
+                    response = self.client.chat.completions.create(
+                        messages=messages,
+                        model=self.model,
+                        temperature=0.4,
+                        response_format={"type": "json_schema", "strict": True},
+                        extra_body={"reasoning_effort": "medium"}
+                    )
+                except Exception as api_err:
+                    if "400" in str(api_err):
+                        print("Strict Mode 400 Error Triggered. Falling back to Best-Effort mode.")
+                        response = self.client.chat.completions.create(
+                            messages=messages,
+                            model=self.model,
+                            temperature=0.4,
+                            response_format={"type": "json_object"},
+                            extra_body={"reasoning_effort": "medium"}
+                        )
+                    else:
+                        raise api_err
+                        
                 raw_text = response.choices[0].message.content
                 output_json = self._extract_json(raw_text)
             
@@ -90,7 +128,7 @@ class SuggestionWrapper:
                     "content": f"Your previous output was invalid. Error: {str(e)}\nPlease repair your JSON output paying attention to the exact schema, exact array length of 3, and anti-repetition rules. Return only valid JSON."
                 }
                 messages.append(repair_message)
-                return self._make_llm_call_with_retry(messages, session_data, attempt + 1)
+                return self._make_llm_call_with_fallback(messages, session_data, attempt + 1)
             else:
                 # Return exception after max retries
                 raise type(e)(f"Failed after 2 attempts. Last error: {str(e)}")
