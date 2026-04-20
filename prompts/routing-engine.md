@@ -9,8 +9,7 @@ Heuristics Options:
 - fact_check: If someone made an absolute statement, cited a statistic, a year, or historical reference.
 - clarification: If an unknown abbreviation, obscure jargon, or ambiguous term is mentioned without immediate explanation.
 - answer: If someone asked a concrete question and it has not been answered yet.
-- discussion_point: If the topic has stalled, a conflict arose, or it transitioned into a brainstorming phase.
-- insight: If a trend or hidden correlation can be extracted from the dialogue.
+- insight: If a trend or hidden correlation can be extracted from the dialogue, or a conflict arose during brainstorming.
 - summary: If a complex topic is evidently concluding.
 
 [STRUCTURED OUTPUT FORMAT]

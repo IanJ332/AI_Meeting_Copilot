@@ -40,6 +40,7 @@ function App() {
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [chat, setChat] = useState<ChatMessage[]>([]);
+  const [pendingBuffer, setPendingBuffer] = useState<TranscriptItem[]>([]); // New pulse buffer
   
   // UI States
   const [isLoading, setIsLoading] = useState(false);
@@ -90,39 +91,158 @@ function App() {
   useEffect(() => transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' }), [transcript]);
   useEffect(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), [chat]);
 
-  // Mock Mic Loop
+  // Real Mic Loop via MediaRecorder, Whisper API, and Voice Activity Detection (VAD)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const lastTranscriptRef = useRef<string>("");
+
   useEffect(() => {
-    let interval: ReturnType<typeof setInterval>;
+    let animationFrameId: number;
+    
+    // VAD State
+    let isSpeaking = false;
+    let silenceStart: number | null = null;
+    let lastFlushTime = Date.now();
+    const SILENCE_THRESHOLD = 6; // Highly sensitive to capture soft phrase endings
+    const SILENCE_DURATION_MS = 4500; // 4.5s pause allowed for thinking/breathing
+    const MAX_CHUNK_MS = 28000; // 28s absolute max to maximize Whisper context window
+
     if (micActive && sessionId) {
-      const mockPhrases = [
-        "We want an AI note feature for customer calls.",
-        "I'm not sure if we should optimize for summary quality or action items.",
-        "Our sales team only cares if follow-ups are accurate.",
-        "Latency matters too, because reps won't wait.",
-        "RAG is cheaper, but fine-tuning may be more consistent.",
-        "Legal says we can't send customer data to a new external vendor."
-      ];
-      let i = transcript.length;
-      
-      interval = setInterval(() => {
-        const text = mockPhrases[i % mockPhrases.length];
-        i++;
-        
-        fetch(`${API_BASE}/transcript`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId, text })
-        }).then(() => {
-          setTranscript(prev => [...prev, {
-            text, speaker: "User", chunk_id: Math.random().toString(), start_ts: new Date().toISOString(), end_ts: new Date().toISOString()
-          }]);
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then((stream) => {
+          const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+          audioContextRef.current = audioContext;
+          const source = audioContext.createMediaStreamSource(stream);
+          const analyser = audioContext.createAnalyser();
+          analyser.fftSize = 512;
+          source.connect(analyser);
+
+          const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+          mediaRecorderRef.current = mediaRecorder;
+          
+          let audioChunks: Blob[] = [];
+          
+          const bufferLength = analyser.frequencyBinCount;
+          const dataArray = new Uint8Array(bufferLength);
+          
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) audioChunks.push(event.data);
+          };
+
+          mediaRecorder.onstop = () => {
+            if (audioChunks.length > 0) {
+              const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+              audioChunks = [];
+              const formData = new FormData();
+              formData.append("audio_data", audioBlob, "chunk.webm");
+              formData.append("settings", JSON.stringify(settings));
+              if (lastTranscriptRef.current) {
+                  // Keep only the last 10 words to give Whisper context for punctuation, 
+                  // but prevent it from hallucinating the end of the sentence (e.g. "business trip")
+                  const words = lastTranscriptRef.current.split(' ');
+                  const trailingContext = words.slice(-10).join(' ');
+                  formData.append("prompt", trailingContext);
+              }
+
+              fetch(`${API_BASE}/audio/transcribe`, {
+                method: "POST",
+                body: formData
+              })
+              .then(res => res.json())
+              .then(data => {
+                if (data.text && data.text.trim()) {
+                  const text = data.text.trim();
+                  
+                  // Filter out Whisper V3 silence hallucination artifacts
+                  const stripped = text.toLowerCase().replace(/[^a-z]/g, '');
+                  const isHallucination = ['you', 'thankyou', 'thanks', 'yeah', 'yes'].includes(stripped);
+                  
+                  if (!isHallucination) {
+                    const newChunk = {
+                      text, speaker: "User", chunk_id: Math.random().toString(), start_ts: new Date().toISOString(), end_ts: new Date().toISOString()
+                    };
+                    setPendingBuffer(prev => [...prev, newChunk]); // Add to back-buffer only
+                    lastTranscriptRef.current = text;
+                  }
+                }
+              })
+              .catch(err => console.error("Audio upload failed", err));
+            }
+          };
+
+          mediaRecorder.start();
+          isSpeaking = false;
+          silenceStart = Date.now();
+          lastFlushTime = Date.now();
+
+          const triggerFlush = () => {
+             if (mediaRecorder.state === "recording") {
+               mediaRecorder.stop();
+               mediaRecorder.start();
+             }
+             isSpeaking = false;
+             silenceStart = Date.now();
+             lastFlushTime = Date.now();
+          };
+
+          const detectAudio = () => {
+            analyser.getByteFrequencyData(dataArray);
+            let sum = 0;
+            for (let i = 0; i < bufferLength; i++) sum += dataArray[i];
+            const rms = Math.sqrt(sum / bufferLength);
+            const now = Date.now();
+
+            if (rms > SILENCE_THRESHOLD) {
+                isSpeaking = true;
+                silenceStart = null;
+            } else {
+                if (silenceStart === null) silenceStart = now;
+            }
+
+            // Flush Condition 1: Pause detected after speaking
+            if (isSpeaking && silenceStart && (now - silenceStart > SILENCE_DURATION_MS)) {
+                // Avoid tiny fraction chunks
+                if (now - lastFlushTime > 2000) {
+                   triggerFlush();
+                } else {
+                   silenceStart = now; 
+                }
+            }
+            // Flush Condition 2: Max time exceeded
+            else if (now - lastFlushTime > MAX_CHUNK_MS) {
+                triggerFlush();
+            }
+
+            animationFrameId = requestAnimationFrame(detectAudio);
+          };
+          
+          detectAudio();
+
+        }).catch(err => {
+            console.error("Mic access denied", err);
+            setMicActive(false);
         });
-      }, mockCadenceSeconds * 1000); 
+    } else {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+            mediaRecorderRef.current.stop();
+            mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+        }
+        if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+            audioContextRef.current.close().catch(() => {});
+        }
     }
+    
     return () => {
-      if (interval) clearInterval(interval);
+      cancelAnimationFrame(animationFrameId);
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+          mediaRecorderRef.current.stop();
+          mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      }
+      if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+          audioContextRef.current.close().catch(() => {});
+      }
     };
-  }, [micActive, sessionId, mockCadenceSeconds, transcript.length]);
+  }, [micActive, sessionId]);
 
   // Auto-refresh loop
   useEffect(() => {
@@ -142,10 +262,23 @@ function App() {
     
     isRefreshing.current = true;
     setIsLoading(true);
-    setExportState(null);
     setRefreshError(null);
     
     try {
+      // SYNC PULSE: Flush pending transcript to server before requesting suggestions
+      if (pendingBuffer.length > 0) {
+        console.log("Sync Pulse: Flushing transcript buffer...");
+        for (const chunk of pendingBuffer) {
+           await fetch(`${API_BASE}/transcript`, {
+             method: "POST",
+             headers: { "Content-Type": "application/json" },
+             body: JSON.stringify({ session_id: sessionId, text: chunk.text })
+           });
+        }
+        setTranscript(prev => [...prev, ...pendingBuffer]);
+        setPendingBuffer([]); // Clear buffer after flush
+      }
+
       const res = await fetch(`${API_BASE}/suggestions/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -186,36 +319,31 @@ function App() {
   const handleSuggestionClick = async (suggestion: Suggestion) => {
     if (!sessionId) return;
     
-    // Add to chat immediately
-    setChat(prev => [...prev, { 
+    const newUserMsg = { 
       role: 'user', 
       content: suggestion.preview,
       timestamp: new Date().toISOString(),
       suggestionType: suggestion.type
-    }]);
+    };
+    
+    // Add to chat immediately
+    setChat(prev => [...prev, newUserMsg as any]);
+    
+    const currentChatSnapshot = [...chat, newUserMsg];
     
     try {
       const res = await fetch(`${API_BASE}/suggestions/click`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, suggestion, settings })
+        body: JSON.stringify({ session_id: sessionId, suggestion, settings, chat_history: currentChatSnapshot })
       });
       const data = await res.json();
       
-      const handoffObj = data.handoff || data; // Fallback mapping in case backend returns raw
+      const handoffObj = data.handoff || data;
       let expansionContent = data.detail_response;
       
-      // Right-panel mock grounding fallback
       if (!expansionContent) {
-        expansionContent = `
-**Phase Detected:** ${handoffObj.phase}
-**Grounding Cues:** ${handoffObj.based_on?.join(" | ") || "Recent context"}
-
-*System detail-generation executed based on seed*: 
-> "${handoffObj.expand_seed}"
-
-This response represents what the real detail-engine will generate once Phase E connects the API up.
-        `;
+        expansionContent = "### ⚠ 速率限制 / 链接超时\n\nAI 生成详细回答时遇到了挑战。这通常是因为免费版 Groq API 的每分钟 Token (TPM) 限制。请稍等 5-10 秒后再次点击该卡片即可正常生成。";
       }
 
       setChat(prev => [...prev, { 
@@ -244,13 +372,12 @@ This response represents what the real detail-engine will generate once Phase E 
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `twinmind-mock-session-${Date.now()}.json`;
+      a.download = `twinmind-session-${Date.now()}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      setExportState("Success");
     } catch(err) {
-      console.error(err);
-      setExportState("Failed");
+      console.error("Export failed", err);
+      alert("Failed to export session data.");
     }
   };
 
@@ -264,7 +391,7 @@ This response represents what the real detail-engine will generate once Phase E 
             <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center'}}>
               {micActive && <span className="blinking-dot"></span>}
               <button className={micActive ? 'danger' : 'primary'} onClick={() => setMicActive(!micActive)}>
-                {micActive ? 'Stop Mic' : 'Start Mic (Mock)'}
+                {micActive ? 'Stop Mic' : 'Start Mic'}
               </button>
             </div>
           </div>
@@ -280,7 +407,7 @@ This response represents what the real detail-engine will generate once Phase E 
             <div ref={transcriptEndRef} />
           </div>
           <div style={{padding: '0.5rem 1rem', background: 'rgba(0,0,0,0.2)', fontSize: '0.8rem', color: '#9aa0a6'}}>
-            Mock Cadence logic: chunk every {mockCadenceSeconds}s
+            Whisper V3 Processing Cadence: Smart VAD (4.5s Pause / 28s Max)
           </div>
         </div>
 
@@ -324,7 +451,7 @@ This response represents what the real detail-engine will generate once Phase E 
                     onClick={() => handleSuggestionClick(s)}
                     style={{ marginBottom: '1rem' }}
                   >
-                    <div className="suggestion-type">{s.type.replace('_', ' ')}</div>
+                    <div className={`suggestion-type type-${s.type}`}>{s.type.replace('_', ' ')}</div>
                     <div className="suggestion-preview">{s.preview}</div>
                   </div>
                 ))}
@@ -339,14 +466,9 @@ This response represents what the real detail-engine will generate once Phase E 
             <span>Detailed Chat Dashboard</span>
             <div style={{display: 'flex', gap: '0.5rem'}}>
               <button onClick={() => setShowSettings(true)}>⚙️ Settings</button>
-              <button onClick={exportSession}>⬇ Export Mock</button>
+              <button className="primary" onClick={exportSession} style={{background: '#10b981', borderColor: '#10b981'}}>⬇ Export Session</button>
             </div>
           </div>
-          {exportState && (
-            <div style={{padding: '0.5rem 1.5rem', background: exportState==='Success'?'rgba(16,185,129,0.2)':'rgba(239,68,68,0.2)', fontSize: '0.8rem', color: '#fff', textAlign: 'center'}}>
-              Export {exportState}
-            </div>
-          )}
           <div className="column-body">
             {chat.length === 0 && <div className="placeholder-text">Click any suggestion to expand its details here.</div>}
             {chat.map((msg, i) => (

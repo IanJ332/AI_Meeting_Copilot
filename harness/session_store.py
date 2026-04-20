@@ -100,7 +100,7 @@ class SessionStore:
             "recent_window_seconds": recent_window_seconds,
             "transcript_recent": recent,
             "transcript_session_summary": summary,
-            "previous_suggestion_batches": session["previous_suggestion_batches"],
+            "previous_suggestion_batches": session["previous_suggestion_batches"][-2:],
             "clicked_suggestions": [
                 {
                     "suggestion_id": c["suggestion_id"], 

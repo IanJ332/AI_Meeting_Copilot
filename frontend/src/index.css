@@ -162,6 +162,13 @@ button:disabled {
   font-weight: 700;
 }
 
+.type-question { color: #60a5fa; }        /* Blue */
+.type-answer { color: #10b981; }          /* Green */
+.type-clarification { color: #f59e0b; }   /* Yellow */
+.type-fact_check { color: #ef4444; }      /* Red */
+.type-insight { color: #d946ef; }         /* Fuchsia / Purple */
+.type-summary { color: #64748b; }         /* Slate */
+
 .suggestion-preview {
   line-height: 1.5;
   font-size: 0.95rem;

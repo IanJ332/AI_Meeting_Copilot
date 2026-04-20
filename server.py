@@ -1,6 +1,7 @@
 import os
 import uuid
 import logging
+import json
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -19,7 +20,7 @@ CORS(app)
 # Global session store
 store = SessionStore()
 
-def generate_detailed_answer(handoff_obj, session_data, settings, api_key):
+def generate_detailed_answer(handoff_obj, session_data, settings, api_key, chat_history=None):
     try:
         from groq import Groq
         if not api_key or not Groq:
@@ -37,17 +38,43 @@ def generate_detailed_answer(handoff_obj, session_data, settings, api_key):
         if old_summary:
             context_text += f"Full conversation summary (older context):\\n{old_summary}\\n\\n"
             
-        context_text += "Recent context:\\n"
-        for chunk in session_data.get("transcript_recent", []):
+        context_text += "Recent context (last 12 items):\\n"
+        for chunk in session_data.get("transcript_recent", [])[-12:]:
             context_text += f"{chunk['speaker']}: {chunk['text']}\\n"
             
+        if chat_history:
+            context_text += "\\n--- PREVIOUS DASHBOARD CHAT LOG (Last 3) ---\\n"
+            for msg in chat_history[-3:]:
+                role_label = "ASSISTANT (You)" if msg.get("role") == "assistant" else "USER"
+                content_snip = msg.get("content", "")
+                context_text += f"{role_label}: {content_snip}\\n"
+            context_text += "--------------------------------------\\n"
+            
+        seed = handoff_obj.get("expand_seed", "")
+        preview = handoff_obj.get("preview", "")
+        suggestion_type = handoff_obj.get("type", "")
+
+        dynamic_rule = ""
+        if suggestion_type == "question":
+            dynamic_rule = "Provide 3 actionable answers to this question."
+        elif suggestion_type == "fact_check":
+            dynamic_rule = "Provide evidence-based correction and cite logic."
+        elif suggestion_type == "insight":
+            dynamic_rule = "Expand on this idea into a strategic narrative."
+        elif suggestion_type == "answer":
+            dynamic_rule = "Provide the steps required to execute this answer."
+        elif suggestion_type == "clarification":
+            dynamic_rule = "Explain the term clearly for a beginner."
+        elif suggestion_type == "summary":
+            dynamic_rule = "Provide a tight bulleted summary of this conclusion."
+
         messages = [
-            {"role": "system", "content": f"{detail_prompt}\\n\\n{context_text}"},
+            {"role": "system", "content": f"{detail_prompt}\n\n[CONTEXTUAL TRIGGER]: {dynamic_rule}\n\nCRITICAL ARCHITECTURAL COMMAND: You MUST keep this response ultra-concise. Use bullet points ONLY. Do not output markdown tables. Absolute maximum of 100 words. Rate limits will strictly penalize long essays.\n\n{context_text}"},
             {"role": "user", "content": f"Please expand on this suggestion preview: '{preview}'. Seed instruction: {seed}"}
         ]
         
         response = client.chat.completions.create(
-            model="gpt-oss-120b", 
+            model="openai/gpt-oss-120b", 
             temperature=0.7,
             messages=messages
         )
@@ -131,14 +158,45 @@ def click_suggestion():
     # Record click to block repetition
     store.record_click(session_id, suggestion, batch_id=handoff_obj.get("batch_id"), phase=handoff_obj.get("phase"))
     
+    chat_history = data.get("chat_history", [])
+
     # Generate detailed chat response via Real API
-    detail_text = generate_detailed_answer(handoff_obj, session_data, settings, api_key)
+    detail_text = generate_detailed_answer(handoff_obj, session_data, settings, api_key, chat_history)
     
     # Return handoff object alongside detail completion
     return jsonify({
         "handoff": handoff_obj,
         "detail_response": detail_text
     })
+
+@app.route("/api/audio/transcribe", methods=["POST"])
+def transcribe_audio():
+    if "audio_data" not in request.files:
+        return jsonify({"error": "No audio file provided"}), 400
+        
+    file = request.files["audio_data"]
+    settings_str = request.form.get("settings", "{}")
+    settings = json.loads(settings_str)
+    api_key = settings.get("groqApiKey") or os.environ.get("GROQ_API_KEY", "")
+    
+    if not api_key:
+        return jsonify({"error": "API Key is missing for audio transcription"}), 401
+
+    try:
+        from groq import Groq
+        client = Groq(api_key=api_key)
+        
+        prompt_text = request.form.get("prompt", "")
+        kwargs = {"model": "whisper-large-v3", "file": (file.filename, file.read())}
+        if prompt_text:
+             kwargs["prompt"] = prompt_text
+             
+        # Audio transcription explicitly using whisper-large-v3
+        transcription = client.audio.transcriptions.create(**kwargs)
+        return jsonify({"text": transcription.text})
+    except Exception as e:
+        app.logger.exception("Error processing audio transcription")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(port=5000, debug=True)
