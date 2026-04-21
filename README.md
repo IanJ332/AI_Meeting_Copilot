@@ -88,6 +88,35 @@ All system prompts live in `prompts/` as standalone Markdown files. This means:
 - Prompt changes are tracked in git history.
 - The Settings panel allows runtime override of prompt text for rapid experimentation.
 
+### Routing Intent Types
+The router classifies the transcript into exactly 3 of the following intent types per batch, ensuring the generation step produces a contextually diverse mix:
+
+| Type | Trigger Condition |
+|------|------------------|
+| `fact_check` | Someone cited a statistic, year, or absolute claim |
+| `clarification` | An acronym, jargon, or ambiguous term appeared without explanation |
+| `answer` | A concrete question was asked but not yet answered |
+| `insight` | A hidden correlation, trend, or conflict can be extracted |
+| `summary` | A complex topic is clearly concluding |
+| `tradeoff` | Two or more competing options are being evaluated without a winner |
+| `next_step` | A task or commitment was explicitly assigned to a person |
+
+### Response Brevity Enforcement
+A critical design goal is that every AI response must be **scannable in under 5 seconds** during a live meeting. Early versions suffered from verbose outputs that made responses unreadable mid-conversation.
+
+This is solved with a **dual-layer enforcement system** that cannot be bypassed:
+
+**Layer 1 — Structural Prompt Formula** (instruction-level):
+```
+Max 5 bullets. Each bullet: max 20 words. No headers. No tables. Under 100 words total.
+```
+This replaces the vague prior instruction (`"Absolute maximum of 100 words"`). Providing an explicit structural formula (`5 × 20 words`) gives the model a mathematical constraint rather than an advisory suggestion, eliminating most verbosity.
+
+**Layer 2 — API Hard Ceiling** (`max_tokens=200`):
+Every chat completion call sets `max_tokens=200` (~130–150 English words). This is enforced by the **Groq API server**, not the model — making it physically impossible to exceed regardless of prompt compliance. The ceiling is set slightly above the prompt target to prevent mid-sentence truncation.
+
+**Why not per-type word limits?** Per-type relaxation (e.g., `insight=200 words`) would have made the most verbose card types *longer* and created an inconsistent UX. The problem was weak enforcement, not the limit itself.
+
 ---
 
 ## ⚙️ Configuration
@@ -128,6 +157,8 @@ Clicking **"Export Session"** triggers a two-phase process:
 
 2. **Phase 2 — Bundle**: The intelligence report is packaged alongside the raw transcript, all suggestion batches (with timestamps), and the full chat history into a single **JSON** file.
 
+> **Security**: The exported JSON automatically **redacts the API key** from the settings snapshot (`groqApiKey: '[REDACTED]'`), ensuring credentials are never written to disk.
+
 If the report API fails, the export degrades gracefully — raw data is still downloaded with `intelligence_report: null`.
 
 ---
@@ -157,6 +188,13 @@ This allows evaluators to experience the full UI flow without consuming API cred
 - **LLM Self-Repair Loop**: On validation failure, a repair instruction is appended and the LLM retries once before engaging the mock fallback.
 - **Rate Limit Awareness**: 401 and 429 errors surface user-friendly alerts with specific guidance (check key vs. wait and retry).
 - **Export Resilience**: Intelligence report generation failure doesn't block the raw data export.
+
+### Click Feedback
+When a suggestion card is clicked, immediate visual feedback is applied before the API responds:
+- The **clicked card** dims to 55% opacity with a `wait` cursor.
+- All **other cards** dim to 85% opacity with a `default` cursor.
+- Concurrent clicks are blocked until the current expansion completes.
+- State clears automatically whether the request succeeds or fails.
 
 ### Audio Overlap Deduplication
 Whisper's 30s window can produce overlapping content when chunks are flushed at natural speech boundaries. The `SessionStore` maintains a sliding window of recent transcript texts and rejects exact duplicates, preventing the LLM from seeing "The quick quick brown fox."
