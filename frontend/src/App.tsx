@@ -32,7 +32,8 @@ interface ChatMessage {
   suggestionType?: string;
 }
 
-const API_BASE = "http://127.0.0.1:5000/api";
+// Use environment variable for API location, fallback to localhost for development
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:5000/api";
 
 function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -425,7 +426,7 @@ function App() {
       let expansionContent = data.detail_response;
       
       if (!expansionContent) {
-        expansionContent = "### ⚠ 速率限制 / 链接超时\n\nAI 生成详细回答时遇到了挑战。这通常是因为免费版 Groq API 的每分钟 Token (TPM) 限制。请稍等 5-10 秒后再次点击该卡片即可正常生成。";
+        expansionContent = "### ⚠ Rate Limit / Connection Timeout\n\nI encountered a challenge while generating the detailed response. This is usually due to the Token-Per-Minute (TPM) limits on the free Groq API. Please wait 5-10 seconds and click the card again to retry.";
       }
 
       setChat(prev => [...prev, { 
