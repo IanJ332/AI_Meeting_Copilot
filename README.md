@@ -11,7 +11,7 @@ A web app that listens to live audio from the user's microphone and continuously
 ### Option 1: Docker
 ```bash
 git clone <repo-url>
-cd TwinMind_Project
+cd <repo-folder>
 docker-compose up
 ```
 Open [http://localhost:5173](http://localhost:5173). Paste your Groq API key in ⚙️ Settings.

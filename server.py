@@ -20,6 +20,12 @@ CORS(app)
 # Global session store
 store = SessionStore()
 
+# Load externalized prompt for chat/detail expansion (loaded once at startup)
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_CHAT_ENGINE_PATH = os.path.join(_BASE_DIR, "prompts", "chat-engine.md")
+with open(_CHAT_ENGINE_PATH, "r", encoding="utf-8") as _f:
+    CHAT_ENGINE_PROMPT = _f.read()
+
 def generate_detailed_answer(handoff_obj, session_data, settings, api_key, chat_history=None, user_query=None):
     try:
         from groq import Groq
@@ -28,31 +34,34 @@ def generate_detailed_answer(handoff_obj, session_data, settings, api_key, chat_
             
         client = Groq(api_key=api_key)
         
-        detail_prompt = settings.get("detailPrompt", "Expand the specific point...")
+        # Select the correct base prompt based on invocation mode (Fix #6)
+        # chatPrompt setting overrides the externalized chat-engine.md default at runtime
+        detail_prompt = settings.get("detailPrompt", "You are an expert meeting analyst. Ground every claim in the transcript. Use bullets. Max 100 words.")
+        chat_prompt   = settings.get("chatPrompt") or CHAT_ENGINE_PROMPT
         
-        # Build prompt context from transcript
+        # Build prompt context from transcript (Fix #3: real \n, not escaped \\n)
         context_text = ""
         old_summary = " ".join([c["text"] for c in session_data.get("transcript_old", [])])
         if old_summary:
-            context_text += f"Full conversation summary (older context):\\n{old_summary}\\n\\n"
+            context_text += f"Full conversation summary (older context):\n{old_summary}\n\n"
             
-        context_text += "Recent context (last 12 items):\\n"
+        context_text += "Recent context (last 12 items):\n"
         for chunk in session_data.get("transcript_recent", [])[-12:]:
-            context_text += f"{chunk['speaker']}: {chunk['text']}\\n"
+            context_text += f"{chunk['speaker']}: {chunk['text']}\n"
             
         if chat_history:
-            context_text += "\\n--- PREVIOUS DASHBOARD CHAT LOG (Last 3) ---\\n"
+            context_text += "\n--- PREVIOUS DASHBOARD CHAT LOG (Last 3) ---\n"
             for msg in chat_history[-3:]:
                 role_label = "ASSISTANT (You)" if msg.get("role") == "assistant" else "USER"
                 content_snip = msg.get("content", "")
-                context_text += f"{role_label}: {content_snip}\\n"
-            context_text += "--------------------------------------\\n"
+                context_text += f"{role_label}: {content_snip}\n"
+            context_text += "--------------------------------------\n"
             
         if user_query:
-            # DIRECT CHAT INPUT MODE
+            # DIRECT CHAT INPUT MODE — use chatPrompt as base (Fix #6)
             dynamic_rule = "Answer the user question directly based on meeting transcript context."
             messages = [
-                {"role": "system", "content": f"{detail_prompt}\n\n[CONTEXTUAL TRIGGER]: {dynamic_rule}\n\nCRITICAL ARCHITECTURAL COMMAND: You MUST keep this response ultra-concise. Use bullet points ONLY. Do not output markdown tables. Absolute maximum of 100 words.\n\n{context_text}"},
+                {"role": "system", "content": f"{chat_prompt}\n\n[CONTEXTUAL TRIGGER]: {dynamic_rule}\n\nCRITICAL BREVITY RULE: Bullets ONLY. Max 5 bullets, each max 20 words. No headers. No tables. Under 100 words total.\n\n{context_text}"},
                 {"role": "user", "content": user_query}
             ]
         else:
@@ -76,13 +85,14 @@ def generate_detailed_answer(handoff_obj, session_data, settings, api_key, chat_
                 dynamic_rule = "Provide a tight bulleted summary of this conclusion."
 
             messages = [
-                {"role": "system", "content": f"{detail_prompt}\n\n[CONTEXTUAL TRIGGER]: {dynamic_rule}\n\nCRITICAL ARCHITECTURAL COMMAND: You MUST keep this response ultra-concise. Use bullet points ONLY. Do not output markdown tables. Absolute maximum of 100 words.\n\n{context_text}"},
+                {"role": "system", "content": f"{detail_prompt}\n\n[CONTEXTUAL TRIGGER]: {dynamic_rule}\n\nCRITICAL BREVITY RULE: Bullets ONLY. Max 5 bullets, each max 20 words. No headers. No tables. Under 100 words total.\n\n{context_text}"},
                 {"role": "user", "content": f"Please expand on this suggestion preview: '{preview}'. Seed instruction: {seed}"}
             ]
         
         response = client.chat.completions.create(
-            model="openai/gpt-oss-120b", 
+            model="openai/gpt-oss-120b",
             temperature=0.7,
+            max_tokens=200,  # Hard ceiling: API-level enforcement prevents runaway generation
             messages=messages
         )
         return response.choices[0].message.content

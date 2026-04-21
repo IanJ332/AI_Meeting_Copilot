@@ -16,14 +16,14 @@ class ContextPacker:
         # Prefix Block (Cacheable Static Part)
         historical = input_data.get("transcript_session_summary", "")
         if historical:
-            messages.append({"role": "system", "content": f"[Full Historical Context]\\n{historical}"})
+            messages.append({"role": "system", "content": f"[Full Historical Context]\n{historical}"})
             
         # Instruction block
         messages.append({"role": "system", "content": self.routing_prompt})
         
         # User payload (Dynamic Part)
-        recent_text = "\\n".join([f"{c['speaker']}: {c['text']}" for c in input_data.get("transcript_recent", [])])
-        messages.append({"role": "user", "content": f"[Recent Transcript]\\n{recent_text}"})
+        recent_text = "\n".join([f"{c['speaker']}: {c['text']}" for c in input_data.get("transcript_recent", [])])
+        messages.append({"role": "user", "content": f"[Recent Transcript]\n{recent_text}"})
         
         return messages
 
@@ -32,13 +32,13 @@ class ContextPacker:
         messages = []
         historical = input_data.get("transcript_session_summary", "")
         if historical:
-            messages.append({"role": "system", "content": f"[Full Historical Context]\\n{historical}"})
+            messages.append({"role": "system", "content": f"[Full Historical Context]\n{historical}"})
             
         system_content = self.suggestion_prompt.replace("DYNAMIC_INTENT_ROUTING_TARGETS", ", ".join(routed_intents))
         
         live_prompt = (settings or {}).get("livePrompt")
         if live_prompt:
-             system_content += f"\\n\\nUSER CUSTOM INSTRUCTION:\\n{live_prompt}"
+             system_content += f"\n\nUSER CUSTOM INSTRUCTION:\n{live_prompt}"
              
         messages.append({"role": "system", "content": system_content})
         

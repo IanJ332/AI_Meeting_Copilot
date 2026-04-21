@@ -62,10 +62,10 @@ function App() {
       }
     }
     return {
-      groqApiKey: '', 
-      livePrompt: 'Extract actionable suggestions...',
-      detailPrompt: 'Expand the specific point...',
-      chatPrompt: 'You are a helpful copilot...',
+      groqApiKey: '',
+      livePrompt: 'Prioritize the most recent 30s. Surface urgent blockers first. Be piercingly direct — max 6 words per card.',
+      detailPrompt: 'You are an expert meeting analyst. Ground every claim in the transcript. Use bullets. Max 100 words.',
+      chatPrompt: 'You are a meeting copilot. Answer questions using transcript context. Be concise and accurate. Max 5 bullets.',
       liveContextWindow: 30,
       detailContextWindow: 180
     };
@@ -391,8 +391,11 @@ function App() {
     }
   };
 
+  const [expandingId, setExpandingId] = useState<string | null>(null);
+
   const handleSuggestionClick = async (suggestion: Suggestion) => {
-    if (!sessionId) return;
+    if (!sessionId || expandingId) return; // Prevent concurrent clicks
+    setExpandingId(suggestion.id);
     
     const newUserMsg = { 
       role: 'user', 
@@ -438,6 +441,8 @@ function App() {
       
     } catch (err) {
       console.error(err);
+    } finally {
+      setExpandingId(null);
     }
   };
 
@@ -478,7 +483,10 @@ function App() {
         transcript,
         rendered_batches: batches,
         chat_history: chat,
-        settings_snapshot: settings
+        settings_snapshot: {
+          ...settings,
+          groqApiKey: '[REDACTED]'  // Never ship credentials to disk
+        }
       };
 
       const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
@@ -613,7 +621,12 @@ function App() {
                     key={s.id} 
                     className="suggestion-card"
                     onClick={() => handleSuggestionClick(s)}
-                    style={{ marginBottom: '1rem' }}
+                    style={{ 
+                      marginBottom: '1rem',
+                      opacity: expandingId === s.id ? 0.55 : expandingId ? 0.85 : 1,
+                      cursor: expandingId ? (expandingId === s.id ? 'wait' : 'default') : 'pointer',
+                      transition: 'opacity 0.2s ease'
+                    }}
                   >
                     <div className={`suggestion-type type-${s.type}`}>{s.type.replace('_', ' ')}</div>
                     <div className="suggestion-preview">{s.preview}</div>
