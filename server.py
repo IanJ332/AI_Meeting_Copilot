@@ -20,7 +20,7 @@ CORS(app)
 # Global session store
 store = SessionStore()
 
-def generate_detailed_answer(handoff_obj, session_data, settings, api_key, chat_history=None):
+def generate_detailed_answer(handoff_obj, session_data, settings, api_key, chat_history=None, user_query=None):
     try:
         from groq import Groq
         if not api_key or not Groq:
@@ -29,10 +29,8 @@ def generate_detailed_answer(handoff_obj, session_data, settings, api_key, chat_
         client = Groq(api_key=api_key)
         
         detail_prompt = settings.get("detailPrompt", "Expand the specific point...")
-        seed = handoff_obj.get("expand_seed", "")
-        preview = handoff_obj.get("preview", "")
         
-        # Build prompt
+        # Build prompt context from transcript
         context_text = ""
         old_summary = " ".join([c["text"] for c in session_data.get("transcript_old", [])])
         if old_summary:
@@ -50,28 +48,37 @@ def generate_detailed_answer(handoff_obj, session_data, settings, api_key, chat_
                 context_text += f"{role_label}: {content_snip}\\n"
             context_text += "--------------------------------------\\n"
             
-        seed = handoff_obj.get("expand_seed", "")
-        preview = handoff_obj.get("preview", "")
-        suggestion_type = handoff_obj.get("type", "")
+        if user_query:
+            # DIRECT CHAT INPUT MODE
+            dynamic_rule = "Answer the user question directly based on meeting transcript context."
+            messages = [
+                {"role": "system", "content": f"{detail_prompt}\n\n[CONTEXTUAL TRIGGER]: {dynamic_rule}\n\nCRITICAL ARCHITECTURAL COMMAND: You MUST keep this response ultra-concise. Use bullet points ONLY. Do not output markdown tables. Absolute maximum of 100 words.\n\n{context_text}"},
+                {"role": "user", "content": user_query}
+            ]
+        else:
+            # SUGGESTION CLICK MODE
+            seed = handoff_obj.get("expand_seed", "")
+            preview = handoff_obj.get("preview", "")
+            suggestion_type = handoff_obj.get("type", "")
 
-        dynamic_rule = ""
-        if suggestion_type == "question":
-            dynamic_rule = "Provide 3 actionable answers to this question."
-        elif suggestion_type == "fact_check":
-            dynamic_rule = "Provide evidence-based correction and cite logic."
-        elif suggestion_type == "insight":
-            dynamic_rule = "Expand on this idea into a strategic narrative."
-        elif suggestion_type == "answer":
-            dynamic_rule = "Provide the steps required to execute this answer."
-        elif suggestion_type == "clarification":
-            dynamic_rule = "Explain the term clearly for a beginner."
-        elif suggestion_type == "summary":
-            dynamic_rule = "Provide a tight bulleted summary of this conclusion."
+            dynamic_rule = ""
+            if suggestion_type == "question":
+                dynamic_rule = "Provide 3 actionable answers to this question."
+            elif suggestion_type == "fact_check":
+                dynamic_rule = "Provide evidence-based correction and cite logic."
+            elif suggestion_type == "insight":
+                dynamic_rule = "Expand on this idea into a strategic narrative."
+            elif suggestion_type == "answer":
+                dynamic_rule = "Provide the steps required to execute this answer."
+            elif suggestion_type == "clarification":
+                dynamic_rule = "Explain the term clearly for a beginner."
+            elif suggestion_type == "summary":
+                dynamic_rule = "Provide a tight bulleted summary of this conclusion."
 
-        messages = [
-            {"role": "system", "content": f"{detail_prompt}\n\n[CONTEXTUAL TRIGGER]: {dynamic_rule}\n\nCRITICAL ARCHITECTURAL COMMAND: You MUST keep this response ultra-concise. Use bullet points ONLY. Do not output markdown tables. Absolute maximum of 100 words. Rate limits will strictly penalize long essays.\n\n{context_text}"},
-            {"role": "user", "content": f"Please expand on this suggestion preview: '{preview}'. Seed instruction: {seed}"}
-        ]
+            messages = [
+                {"role": "system", "content": f"{detail_prompt}\n\n[CONTEXTUAL TRIGGER]: {dynamic_rule}\n\nCRITICAL ARCHITECTURAL COMMAND: You MUST keep this response ultra-concise. Use bullet points ONLY. Do not output markdown tables. Absolute maximum of 100 words.\n\n{context_text}"},
+                {"role": "user", "content": f"Please expand on this suggestion preview: '{preview}'. Seed instruction: {seed}"}
+            ]
         
         response = client.chat.completions.create(
             model="openai/gpt-oss-120b", 
@@ -116,7 +123,78 @@ def refresh_suggestions():
     # 2. Run wrapper
     wrapper = SuggestionWrapper(api_key=api_key)
     try:
-        output = wrapper.run_suggestion_cycle(input_data, session_data, settings=settings)
+        if (not api_key):
+            # 1. GHOST CHECK: Only return mock suggestions if there is actual transcript content
+            recent_text = "".join([t["text"] for t in input_data.get("transcript_recent", [])])
+            if not recent_text:
+                return jsonify({
+                    "status": "not-ready",
+                    "message": "Waiting for transcription to start...",
+                    "suggestions": []
+                })
+
+            # 2. STABILITY FILTER: If the transcript hasn't changed, keep cards stable
+            last_seen = session_data.get("last_mock_transcript_hash", "")
+            current_hash = str(hash(recent_text))
+            
+            # In Mock Mode, we enforce strict stability if content hasn't changed
+            if last_seen == current_hash:
+                return jsonify({
+                    "status": "stable",
+                    "current_phase": "early_exploration",
+                    "suggestions": session_data.get("last_mock_suggestions", []),
+                    "is_mock": True
+                })
+            
+            session_data["last_mock_transcript_hash"] = current_hash
+
+            # 3. SCRIPTED SCENARIO: Cycle through a logical meeting flow
+            # Mapping specific suggestions to transcript indices for 'hand-in-glove' demo
+            scenario = [
+                {
+                    "text": "The main challenge for TwinMind right now is scaling to millions of users while maintaining low latency.",
+                    "suggestions": [
+                        {"id": "s1", "type": "question", "preview": "How do we handle Groq rate limits during peak usage?", "topic": "infrastructure"},
+                        {"id": "s2", "type": "insight", "preview": "Latency over 2sec significantly drops user engagement.", "topic": "performance"},
+                        {"id": "s3", "type": "fact_check", "preview": "Check Groq's burst capacity for Whisper-V3.", "topic": "scaling"}
+                    ]
+                },
+                {
+                    "text": "We need to ensure that the Live Suggestions are contextually varied—sometimes questions, sometimes fact-checks.",
+                    "suggestions": [
+                        {"id": "s4", "type": "insight", "preview": "Varied suggestion types increase CTR by 45%.", "topic": "UX"},
+                        {"id": "s5", "type": "suggestion", "preview": "Consider adding a 'Contradiction' detector for fact-checks.", "topic": "product"},
+                        {"id": "s6", "type": "question", "preview": "What is the prompt strategy for 'Decision' detection?", "topic": "AI"}
+                    ]
+                },
+                {
+                    "text": "Let's focus on the US-only pilot first before rolling out to EU regions due to GDPR complexities.",
+                    "suggestions": [
+                        {"id": "s7", "type": "fact_check", "preview": "EU data residency requires separate storage shards.", "topic": "legal"},
+                        {"id": "s8", "type": "question", "preview": "When will the Frankfurt server shard be ready?", "topic": "deployment"},
+                        {"id": "s9", "type": "insight", "preview": "GDPR compliance for voice-to-text has strict TTL limits.", "topic": "compliance"}
+                    ]
+                }
+            ]
+            
+            # Map suggestions to the current mock_counter
+            idx = (session_data.get("mock_counter", 1) - 1) % len(scenario)
+            selected = scenario[idx]["suggestions"]
+            
+            # Add unique IDs so React sees 'newness'
+            for s in selected:
+                s["id"] = s["id"] + "-" + str(uuid.uuid4())[:4]
+
+            session_data["last_mock_suggestions"] = selected
+            
+            output = {
+                "status": "ready",
+                "current_phase": "early_exploration",
+                "suggestions": selected,
+                "is_mock": True
+            }
+        else:
+            output = wrapper.run_suggestion_cycle(input_data, session_data, settings=settings)
         
         # If not ready, return early
         if output.get("status") == "not-ready":
@@ -160,13 +238,42 @@ def click_suggestion():
     
     chat_history = data.get("chat_history", [])
 
-    # Generate detailed chat response via Real API
-    detail_text = generate_detailed_answer(handoff_obj, session_data, settings, api_key, chat_history)
+    if not api_key:
+        detail_text = f"### [MOCK DETAIL]: {suggestion.get('preview')}\n\nThis is a mock expansion of the selected suggestion. To see real AI insights, please add your Groq API Key in the Settings panel."
+    else:
+        # Generate detailed chat response via Real API
+        detail_text = generate_detailed_answer(handoff_obj, session_data, settings, api_key, chat_history)
     
     # Return handoff object alongside detail completion
     return jsonify({
         "handoff": handoff_obj,
         "detail_response": detail_text
+    })
+
+@app.route("/api/chat/message", methods=["POST"])
+def chat_message():
+    data = request.json
+    session_id = data.get("session_id")
+    message = data.get("message")
+    settings = data.get("settings", {})
+    chat_history = data.get("chat_history", [])
+    api_key = settings.get("groqApiKey") or os.environ.get("GROQ_API_KEY", "")
+
+    if not session_id or not message:
+        return jsonify({"error": "Missing session_id or message"}), 400
+
+    session_data = store.get_session(session_id)
+
+    if not api_key:
+        # Context-aware mock response
+        phrase_count = len(session_data.get("transcript_recent", []))
+        response_text = f"### [MOCK CHAT RESPONSE]\n\nYou asked: \"{message}\"\n\nIn a real GPT-OSS session, I would consider the full transcript ({phrase_count} phrases today) and previous chat history to answer your question specifically. This feature allows free-form follow-ups on meeting details."
+    else:
+        # Real AI response using unified engine
+        response_text = generate_detailed_answer(None, session_data, settings, api_key, chat_history, user_query=message)
+
+    return jsonify({
+        "response": response_text
     })
 
 @app.route("/api/audio/transcribe", methods=["POST"])
@@ -180,7 +287,23 @@ def transcribe_audio():
     api_key = settings.get("groqApiKey") or os.environ.get("GROQ_API_KEY", "")
     
     if not api_key:
-        return jsonify({"error": "API Key is missing for audio transcription"}), 401
+        # SCENARIO-DRIVEN MOCKING: Return sequential phrases about scaling and privacy
+        mock_phrases = [
+            "The main challenge for TwinMind right now is scaling to millions of users while maintaining low latency.",
+            "We need to ensure that the Live Suggestions are contextually varied—sometimes questions, sometimes fact-checks.",
+            "Let's focus on the US-only pilot first before rolling out to EU regions due to GDPR complexities.",
+            "Wait, I just realized Priya is out starting tomorrow.",
+            "We need someone else to own the security audit documentation."
+        ]
+        
+        session_data = store.get_session(request.form.get("session_id", "default"))
+        curr = session_data.get("mock_counter", 0)
+        idx = curr % len(mock_phrases)
+        text = f"[Mock]: {mock_phrases[idx]}"
+        
+        # Increment counter for next time
+        session_data["mock_counter"] = curr + 1
+        return jsonify({"text": text, "is_mock": True})
 
     try:
         from groq import Groq

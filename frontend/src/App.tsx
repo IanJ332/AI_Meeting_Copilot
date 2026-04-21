@@ -40,12 +40,11 @@ function App() {
   const [transcript, setTranscript] = useState<TranscriptItem[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [chat, setChat] = useState<ChatMessage[]>([]);
-  const [pendingBuffer, setPendingBuffer] = useState<TranscriptItem[]>([]); // New pulse buffer
+  const [userInput, setUserInput] = useState("");
   
   // UI States
   const [isLoading, setIsLoading] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
-  const [exportState, setExportState] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const isRefreshing = useRef(false);
@@ -76,6 +75,57 @@ function App() {
     localStorage.setItem('twinmind_settings', JSON.stringify(settings));
   }, [settings]);
 
+  // 5. Scripted Simulation Engine (Mock Mode Auto-Playback)
+  useEffect(() => {
+    let simulationInterval: ReturnType<typeof setInterval>;
+    
+    if (micActive && !settings.groqApiKey && sessionId) {
+      console.log("Simulation Engine: Active (Playback mode)");
+      simulationInterval = setInterval(() => {
+        // Trigger a 'Synthetic Pulse' that calls the transcribe endpoint
+        const formData = new FormData();
+        formData.append("session_id", sessionId);
+        formData.append("settings", JSON.stringify(settings));
+        // Empty blob just to satisfy the multipart requirement, backend ignores it in mock mode
+        formData.append("audio_data", new Blob([], { type: 'audio/wav' }), "simulation.wav");
+
+        fetch(`${API_BASE}/audio/transcribe`, {
+          method: "POST",
+          body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (data.text) {
+            const text = data.text;
+            
+            // CORE SYNC: Notify backend of the new transcript line so the suggestion engine can 'hear' it
+            fetch(`${API_BASE}/transcript`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ session_id: sessionId, text: text })
+            });
+
+            // Use the choreographed pacing logic for UI rendering
+            setTimeout(() => {
+              setTranscript(prev => [...prev, {
+                text, speaker: "User", chunk_id: Math.random().toString(), start_ts: new Date().toISOString(), end_ts: new Date().toISOString()
+              }]);
+              
+              setTimeout(() => {
+                handleRefresh("auto");
+              }, 1500);
+            }, 1000);
+          }
+        });
+      }, 7000); // Pulse every 7 seconds for a comfortable demo pace
+    }
+
+    return () => {
+      if (simulationInterval) clearInterval(simulationInterval);
+    };
+  }, [micActive, settings.groqApiKey, sessionId, settings]); 
+
+  // Auto-scroll logic for Transcript and Chat
   const transcriptEndRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -103,9 +153,10 @@ function App() {
     let isSpeaking = false;
     let silenceStart: number | null = null;
     let lastFlushTime = Date.now();
-    const SILENCE_THRESHOLD = 6; // Highly sensitive to capture soft phrase endings
-    const SILENCE_DURATION_MS = 4500; // 4.5s pause allowed for thinking/breathing
-    const MAX_CHUNK_MS = 28000; // 28s absolute max to maximize Whisper context window
+    // Adaptive VAD Timing: Snappy (1.5s) for Mock demo, Intelligent (4.5s) for Real AI
+    const SILENCE_THRESHOLD = 10; 
+    const SILENCE_DURATION_MS = !settings.groqApiKey ? 1500 : 4500;
+    const MAX_CHUNK_MS = 28000;
 
     if (micActive && sessionId) {
       navigator.mediaDevices.getUserMedia({ audio: true })
@@ -150,6 +201,16 @@ function App() {
               })
               .then(res => res.json())
               .then(data => {
+                if (data.error) {
+                  console.error("Transcription Error:", data.error);
+                  if (data.error.includes("401") || data.error.includes("API Key")) {
+                    alert("⚠️ Authentication Error: Your Groq API Key is invalid or expired. Please check Settings.");
+                  } else if (data.error.includes("429")) {
+                    alert("⚠️ Rate Limit: Groq API is throttled. Please wait a moment.");
+                  }
+                  return;
+                }
+                
                 if (data.text && data.text.trim()) {
                   const text = data.text.trim();
                   
@@ -158,15 +219,37 @@ function App() {
                   const isHallucination = ['you', 'thankyou', 'thanks', 'yeah', 'yes'].includes(stripped);
                   
                   if (!isHallucination) {
-                    const newChunk = {
-                      text, speaker: "User", chunk_id: Math.random().toString(), start_ts: new Date().toISOString(), end_ts: new Date().toISOString()
-                    };
-                    setPendingBuffer(prev => [...prev, newChunk]); // Add to back-buffer only
+                    // REAL AI MODE: Sync and fire suggestions for real voice input
+                    // Note: Mock Mode is now handled exclusively by the Scripted Simulation Engine loop
+                    if (settings.groqApiKey) {
+                      setTranscript(prev => {
+                        const lastLine = (prev[prev.length - 1]?.text || "").trim();
+                        if (lastLine && (text.includes(lastLine) || lastLine.includes(text) || text === lastLine)) {
+                          return prev;
+                        }
+
+                        fetch(`${API_BASE}/transcript`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ session_id: sessionId, text: text })
+                        });
+                        
+                        handleRefresh("auto");
+
+                        return [...prev, {
+                          text, speaker: "User", chunk_id: Math.random().toString(), start_ts: new Date().toISOString(), end_ts: new Date().toISOString()
+                        }];
+                      });
+                    }
                     lastTranscriptRef.current = text;
                   }
                 }
               })
-              .catch(err => console.error("Audio upload failed", err));
+              .catch(err => {
+                console.error("Audio upload failed", err);
+                // Only alert on critical network/auth issues, not every chunk retry
+                if (micActive) alert("⚠️ Critical Connection Error: Could not reach the AI server.");
+              });
             }
           };
 
@@ -265,20 +348,6 @@ function App() {
     setRefreshError(null);
     
     try {
-      // SYNC PULSE: Flush pending transcript to server before requesting suggestions
-      if (pendingBuffer.length > 0) {
-        console.log("Sync Pulse: Flushing transcript buffer...");
-        for (const chunk of pendingBuffer) {
-           await fetch(`${API_BASE}/transcript`, {
-             method: "POST",
-             headers: { "Content-Type": "application/json" },
-             body: JSON.stringify({ session_id: sessionId, text: chunk.text })
-           });
-        }
-        setTranscript(prev => [...prev, ...pendingBuffer]);
-        setPendingBuffer([]); // Clear buffer after flush
-      }
-
       const res = await fetch(`${API_BASE}/suggestions/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -290,7 +359,11 @@ function App() {
       });
       
       if (!res.ok) {
-         throw new Error(`API Error ${res.status}: ${res.statusText}`);
+         const errData = await res.json().catch(() => ({}));
+         const errMsg = errData.error || `API Error ${res.status}`;
+         if (res.status === 401) alert("⚠️ Authentication Error: Invalid Groq API Key. Please check your Settings.");
+         else if (res.status === 429) alert("⚠️ Rate Limit: Groq API is throttled. Fallback data might be displayed.");
+         throw new Error(errMsg);
       }
       
       const data = await res.json();
@@ -298,6 +371,7 @@ function App() {
       
       if (data.error) {
         setRefreshError(data.error);
+        if (data.error.includes("401")) alert("⚠️ API Key Error: Your key was rejected by Groq.");
         console.error("Refresh error:", data.error);
       } else if (data.status === "not-ready") {
         console.log("Harness not ready:", data.message);
@@ -337,6 +411,14 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, suggestion, settings, chat_history: currentChatSnapshot })
       });
+      
+      if (!res.ok) {
+         const errData = await res.json().catch(() => ({}));
+         if (res.status === 401) alert("⚠️ Authentication Error: Your Groq API Key is invalid.");
+         else alert("⚠️ Expansion Failed: " + (errData.error || "Connection issue"));
+         return;
+      }
+
       const data = await res.json();
       
       const handoffObj = data.handoff || data;
@@ -381,13 +463,62 @@ function App() {
     }
   };
 
+  const handleChatSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userInput.trim() || !sessionId) return;
+
+    const message = userInput.trim();
+    setUserInput("");
+
+    // Optimistic Update
+    const userMsg: ChatMessage = { role: 'user', content: message, timestamp: new Date().toISOString() };
+    setChat(prev => [...prev, userMsg]);
+    setIsLoading(true);
+
+    try {
+      const res = await fetch(`${API_BASE}/chat/message`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          message: message,
+          chat_history: chat,
+          settings: settings
+        })
+      });
+
+      if (!res.ok) throw new Error("Chat failed");
+      const data = await res.json();
+      
+      setChat(prev => [...prev, {
+        role: 'assistant',
+        content: data.response || "No response received",
+        timestamp: new Date().toISOString()
+      }]);
+    } catch (err) {
+      console.error("Chat error:", err);
+      setChat(prev => [...prev, {
+        role: 'assistant',
+        content: "⚠️ I encountered an error while processing your request.",
+        timestamp: new Date().toISOString()
+      }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <>
       <div className="app-container">
         {/* LEFT COLUMN: Transcript */}
         <div className="column">
           <div className="column-header">
-            <span>Live Transcript</span>
+            <span style={{display:'flex', alignItems:'center', gap:'0.5rem'}}>
+              Live Transcript
+              {!settings.groqApiKey && (
+                <span className="badge" style={{background: '#f59e0b', color: 'white', fontSize: '0.65rem', padding: '0.1rem 0.4rem'}}>MOCK MODE</span>
+              )}
+            </span>
             <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center'}}>
               {micActive && <span className="blinking-dot"></span>}
               <button className={micActive ? 'danger' : 'primary'} onClick={() => setMicActive(!micActive)}>
@@ -482,6 +613,28 @@ function App() {
               </div>
             ))}
             <div ref={chatEndRef} />
+          </div>
+
+          {/* Chat Input Bar */}
+          <div style={{padding: '1rem', borderTop: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.2)'}}>
+            <form onSubmit={handleChatSubmit} style={{display: 'flex', gap: '0.5rem'}}>
+              <input 
+                type="text" 
+                value={userInput}
+                onChange={e => setUserInput(e.target.value)}
+                placeholder="Ask me anything contextually..."
+                className="settings-input"
+                style={{margin: 0, borderRadius: '8px'}}
+              />
+              <button 
+                type="submit" 
+                className="primary" 
+                disabled={!userInput.trim() || isLoading}
+                style={{whiteSpace: 'nowrap'}}
+              >
+                Send
+              </button>
+            </form>
           </div>
         </div>
       </div>

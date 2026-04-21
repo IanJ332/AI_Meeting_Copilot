@@ -12,7 +12,9 @@ class SessionStore:
                 "transcript_recent": [],
                 "transcript_old": [],
                 "previous_suggestion_batches": [],
-                "clicked_suggestions": []
+                "clicked_suggestions": [],
+                "mock_counter": 0,
+                "last_mock_hash": ""
             }
         return self.sessions[session_id]
 
