@@ -289,7 +289,7 @@ def transcribe_audio():
     if not api_key:
         # SCENARIO-DRIVEN MOCKING: Return sequential phrases about scaling and privacy
         mock_phrases = [
-            "The main challenge for TwinMind right now is scaling to millions of users while maintaining low latency.",
+            "The main challenge for our AI copilot right now is scaling to millions of users while maintaining low latency.",
             "We need to ensure that the Live Suggestions are contextually varied—sometimes questions, sometimes fact-checks.",
             "Let's focus on the US-only pilot first before rolling out to EU regions due to GDPR complexities.",
             "Wait, I just realized Priya is out starting tomorrow.",
@@ -319,6 +319,121 @@ def transcribe_audio():
         return jsonify({"text": transcription.text})
     except Exception as e:
         app.logger.exception("Error processing audio transcription")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/session/report", methods=["POST"])
+def generate_session_report():
+    """
+    Intelligence Report Generator.
+    Called on-demand when the user clicks 'Export'. Aggregates the full session
+    context (transcript + suggestions + chat) and asks the LLM to produce a
+    structured meeting intelligence report.
+    """
+    data = request.json
+    session_id = data.get("session_id")
+    settings = data.get("settings", {})
+    api_key = settings.get("groqApiKey") or os.environ.get("GROQ_API_KEY", "")
+
+    if not session_id:
+        return jsonify({"error": "Missing session_id"}), 400
+
+    session_data = store.get_session(session_id)
+
+    # Assemble full transcript text
+    all_chunks = session_data.get("transcript_old", []) + session_data.get("transcript_recent", [])
+    full_transcript = "\n".join([f"{c['speaker']}: {c['text']}" for c in all_chunks])
+
+    # Assemble suggestion history
+    suggestion_history = ""
+    for batch in session_data.get("previous_suggestion_batches", []):
+        suggestion_history += f"\n[Batch - Phase: {batch.get('phase', 'unknown')}]\n"
+        for s in batch.get("suggestions", []):
+            suggestion_history += f"  - [{s.get('type')}] {s.get('preview')}\n"
+
+    # Assemble chat history from request payload
+    chat_history_items = data.get("chat_history", [])
+    chat_text = ""
+    for msg in chat_history_items:
+        role = "USER" if msg.get("role") == "user" else "ASSISTANT"
+        chat_text += f"{role}: {msg.get('content', '')}\n"
+
+    if not api_key:
+        # Mock intelligence report for keyless demo
+        mock_report = {
+            "key_decisions": [
+                "Proceed with US-only pilot to avoid EU data residency blockers",
+                "Prioritize latency optimization over feature breadth for MVP"
+            ],
+            "action_items": [
+                {"owner": "Priya", "task": "Own security audit documentation", "deadline": "Before the 15th"},
+                {"owner": "Engineering Lead", "task": "Evaluate API burst capacity for Whisper-V3", "deadline": None}
+            ],
+            "important_facts": [
+                "Latency over 2 seconds significantly drops user engagement",
+                "EU data residency requires separate storage shards under GDPR"
+            ],
+            "bullet_summary": [
+                "Team discussed scaling the AI copilot to millions of users while maintaining sub-2s latency.",
+                "Live suggestion variety (questions, fact-checks, insights) increases click-through rate by 45%.",
+                "GDPR compliance for voice-to-text has strict TTL limits, prompting a US-first strategy.",
+                "Security audit ownership was assigned; a rollback plan is still needed."
+            ],
+            "open_questions": [
+                "When will the Frankfurt server shard be ready for EU expansion?",
+                "What is the prompt strategy for 'Decision' phase detection?"
+            ],
+            "meeting_sentiment": "Collaborative and forward-looking, with clear consensus on a phased rollout strategy.",
+            "follow_up_email_draft": "Hi Team,\n\nThank you for the productive discussion today. Here is a quick recap:\n\n- We will proceed with a US-only pilot for the MVP to sidestep EU data residency complexity.\n- Priya will own the security audit documentation (target: before the 15th).\n- Engineering will evaluate API burst capacity to ensure sub-2s latency at scale.\n- Open item: Frankfurt shard timeline for Phase 2 EU rollout.\n\nPlease flag any concerns by EOD Friday.\n\nBest regards"
+        }
+        return jsonify({"report": mock_report, "is_mock": True})
+
+    try:
+        from groq import Groq
+        client = Groq(api_key=api_key)
+
+        # Load the externalized report prompt
+        report_prompt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts", "report-engine.md")
+        with open(report_prompt_path, "r", encoding="utf-8") as f:
+            report_system_prompt = f.read()
+
+        # Construct the user message with all session context
+        user_content = f"""[FULL MEETING TRANSCRIPT]
+{full_transcript if full_transcript else '(No transcript recorded)'}
+
+[AI SUGGESTION BATCHES GENERATED DURING SESSION]
+{suggestion_history if suggestion_history else '(No suggestions generated)'}
+
+[CHAT HISTORY BETWEEN USER AND AI COPILOT]
+{chat_text if chat_text else '(No chat messages)'}"""
+
+        response = client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            temperature=0.3,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": report_system_prompt},
+                {"role": "user", "content": user_content}
+            ]
+        )
+
+        raw_text = response.choices[0].message.content.strip()
+
+        # Parse the JSON response
+        try:
+            report_json = json.loads(raw_text)
+        except json.JSONDecodeError:
+            # Attempt to extract JSON from potential markdown fences
+            start = raw_text.find('{')
+            end = raw_text.rfind('}')
+            if start != -1 and end != -1:
+                report_json = json.loads(raw_text[start:end+1])
+            else:
+                report_json = {"error": "Failed to parse AI report", "raw": raw_text}
+
+        return jsonify({"report": report_json, "is_mock": False})
+
+    except Exception as e:
+        app.logger.exception("Error generating session report")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":

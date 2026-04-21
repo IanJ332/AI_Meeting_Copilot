@@ -441,16 +441,46 @@ function App() {
     }
   };
 
-  const exportSession = () => {
+  const [isExporting, setIsExporting] = useState(false);
+
+  const exportSession = async () => {
+    if (!sessionId) return;
+    setIsExporting(true);
+
     try {
+      // Phase 1: Request AI Intelligence Report from backend
+      let intelligenceReport = null;
+      try {
+        const reportRes = await fetch(`${API_BASE}/session/report`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: sessionId,
+            settings: settings,
+            chat_history: chat
+          })
+        });
+        if (reportRes.ok) {
+          const reportData = await reportRes.json();
+          intelligenceReport = reportData.report;
+        }
+      } catch (reportErr) {
+        console.warn("Intelligence report generation failed, exporting raw data only:", reportErr);
+      }
+
+      // Phase 2: Bundle everything into the final export package
       const exportData = {
         session_id: sessionId,
         exported_at: new Date().toISOString(),
-        settings_snapshot: settings,
+        // AI-Generated Intelligence Report (the "memory" layer)
+        intelligence_report: intelligenceReport,
+        // Raw Session Data
         transcript,
         rendered_batches: batches,
-        chat_history: chat
+        chat_history: chat,
+        settings_snapshot: settings
       };
+
       const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -461,6 +491,8 @@ function App() {
     } catch(err) {
       console.error("Export failed", err);
       alert("Failed to export session data.");
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -598,7 +630,9 @@ function App() {
             <span>Detailed Chat Dashboard</span>
             <div style={{display: 'flex', gap: '0.5rem'}}>
               <button onClick={() => setShowSettings(true)}>⚙️ Settings</button>
-              <button className="primary" onClick={exportSession} style={{background: '#10b981', borderColor: '#10b981'}}>⬇ Export Session</button>
+              <button className="primary" onClick={exportSession} disabled={isExporting} style={{background: '#10b981', borderColor: '#10b981'}}>
+                {isExporting ? '⏳ Generating Report...' : '⬇ Export Session'}
+              </button>
             </div>
           </div>
           <div className="column-body">
@@ -679,6 +713,14 @@ function App() {
                  rows={2}
                  value={settings.detailPrompt}
                  onChange={e => setSettings({...settings, detailPrompt: e.target.value})}
+               />
+
+               <label>Chat Prompt (Free-form Questions)</label>
+               <textarea 
+                 className="settings-input"
+                 rows={2}
+                 value={settings.chatPrompt}
+                 onChange={e => setSettings({...settings, chatPrompt: e.target.value})}
                />
 
                <div style={{display:'flex', gap:'1rem'}}>

@@ -1,76 +1,202 @@
-# Real-time AI Meeting Copilot 🧠🚀
+# Real-time AI Meeting Copilot 🧠
 
-A professional-grade, high-fidelity AI companion designed to revolutionize real-time meeting collaboration. By leveraging sub-second transcription and adaptive LLM reasoning, this copilot provides contextually aware suggestions, fact-checks, and an interactive chat dashboard to help you stay ahead during complex technical discussions.
+A web app that listens to live audio from the user's microphone and continuously surfaces 3 useful, context-aware suggestions based on what is being said. Clicking a suggestion opens a detailed answer in an interactive chat panel. The system also generates an **AI-powered Intelligence Report** at export time, extracting key decisions, action items, and a draft follow-up email.
 
-![Stack](https://img.shields.io/badge/stack-Flask%20%7C%20Vite%20%7C%20Cloud%20API-purple.svg)
-
----
-
-## 🛠 Engineering Highlights
-
-This project was built with a focus on low-latency performance, context-aware reasoning, and production-ready code quality.
-
-### 🧠 Prompt Engineering & Reasoning
-- **Dual-Pass Routing**: Implements an intent classification layer (Pass 1) followed by a targeted generation layer (Pass 2). This isolates "what info is needed" from "how to phrase it," ensuring high fidelity and low hallucination.
-- **Sliding Context Windows**: Backend logic manages two tiers of memory: a "Recent Window" (30s) for immediate reaction and a "Session Summary" for historical continuity.
-- **Externalized Logic**: All core system prompts are decoupled into standalone markdown files (`prompts/`), allowing for version-controlled tuning and rapid iteration without modifying core Python logic.
-
-### 🏗 Full-stack & Audio Engineering
-- **Adaptive VAD (Voice Activity Detection)**: Implements custom client-side audio analysis to detect speech vs. silence, dynamically adjusting flush intervals (1.5s for snappy demos, 4.5s for natural conversation).
-- **Audio Overlap Deduplication**: A specialized `SessionStore` logic handles overlapping transcription artifacts from sliding windows, preventing "double-word" hallucinations in the AI input.
-- **Strict Schema Validation**: All AI outputs are validated against a JSON-Schema (`contracts/`) to ensure the frontend always receives stable, renderable data packets.
-
-### 💎 Code Quality
-- **Modular Architecture**: Clean separation of concerns between transcription processing (`server.py`), context packaging (`context_packer.py`), and novelty filtering (`novelty_filter.py`).
-- **Zero-Placeholder Policy**: Every icon, mock dialogue, and sample data point is carefully curated for a "Museum-Grade" demonstration experience.
+**Models**: `whisper-large-v3` (transcription) · `openai/gpt-oss-120b` (suggestions & chat) — via Groq API.
 
 ---
 
-## ✨ Core Features
+## 🚀 Quick Start
 
-- **🔴 Live Transcript**: Powered by `whisper-large-v3` with sub-second feedback via adaptive audio chunking.
-- **💡 Smart Suggestion Batches**: Context-analysis every 30s that generates actionable insights, fact-checks, and clarifying questions using `openai/gpt-oss-120b`.
-- **💬 Detailed Chat Dashboard**: An interactive panel to expand on AI suggestions or ask free-form follow-up questions using the full meeting context.
-- **📂 Professional Export**: One-click export of transcripts, suggestions, and chat history into a structured **JSON** format.
-- **🎭 Simulation Mode**: A sophisticated simulation engine for demonstration purposes, triggering choreographed meeting scenarios without requiring an active API key.
-
----
-
-## 🚀 Quick Start (Local Setup)
-
-### Option 1: Docker (Recommended)
+### Option 1: Docker
 ```bash
+git clone <repo-url>
+cd TwinMind_Project
 docker-compose up
 ```
-Open [http://localhost:5173](http://localhost:5173) to view the app.
+Open [http://localhost:5173](http://localhost:5173). Paste your Groq API key in ⚙️ Settings.
 
-### Option 2: Manual Setup
-**Backend:**
+### Option 2: Manual
 ```bash
+# Backend
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 python server.py
-```
-**Frontend:**
-```bash
+
+# Frontend (new terminal)
 cd frontend && npm install && npm run dev
 ```
 
 ---
 
+## 🏗 Architecture Overview
+
+```
+├── server.py                    # Flask API server (transcription, suggestions, chat, report)
+├── harness/
+│   ├── suggestion_wrapper.py    # Two-pass LLM orchestrator (routing → generation)
+│   ├── context_packer.py        # Builds LLM message arrays with sliding context windows
+│   ├── session_store.py         # In-memory session state with overlap deduplication
+│   ├── novelty_filter.py        # Anti-repetition filter for suggestion batches
+│   ├── schema_validator.py      # JSON-Schema validation against contracts/
+│   └── handoff.py               # Click → chat context bridge
+├── prompts/                     # All system prompts (externalized, version-controllable)
+│   ├── suggestion-engine.md     # Core suggestion generation prompt
+│   ├── routing-engine.md        # Intent classification prompt
+│   ├── report-engine.md         # Intelligence report generation prompt
+│   └── chat-engine.md           # Chat expansion prompt
+├── contracts/                   # JSON-Schema for input/output validation
+├── frontend/src/
+│   └── App.tsx                  # Single-file React app (transcript, suggestions, chat)
+└── docs/testing/                # Audit rubrics and simulation scripts
+```
+
+---
+
+## 🧠 Prompt Strategy & Tradeoffs
+
+### Dual-Pass Routing Architecture
+Rather than asking a single LLM call to "figure out what to suggest," the system uses **two sequential passes**:
+
+1. **Pass 1 — Intent Classification** (`routing-engine.md`): A fast, low-temperature call that classifies the transcript into exactly 3 intent types (e.g., `fact_check`, `question`, `insight`). This acts as a lightweight "router" that decides *what kind* of help is needed.
+
+2. **Pass 2 — Targeted Generation** (`suggestion-engine.md`): A separate call that receives the routed intents and generates exactly 3 suggestion cards, one per intent. By constraining the generation to pre-classified intents, hallucination drops significantly and card diversity is guaranteed.
+
+**Why two passes instead of one?** A single-pass approach often produces 3 variations of the same type (e.g., three generic questions). The routing layer forces diversity by design. The latency cost (~200ms extra) is justified by the quality gain.
+
+### Context Window Management
+The system manages two tiers of transcript memory:
+
+| Tier | Content | Purpose |
+|------|---------|---------|
+| **Recent Window** (configurable, default 30s) | Last ~30 seconds of raw transcript chunks | Drives suggestion relevance — "what was just said" |
+| **Session Summary** | All older transcript concatenated | Provides historical continuity — prevents suggesting things already resolved |
+
+Both tiers are passed as separate system messages to leverage Groq's KV-cache prefix alignment: the historical context (which rarely changes) remains cacheable, while only the recent window rotates.
+
+### Anti-Repetition Strategy
+Three layers prevent stale suggestions:
+
+1. **Topic Signature Deduplication**: Each suggestion carries a `topic_signature` slug. The `novelty_filter.py` rejects any batch where a signature matches a previously shown batch.
+2. **Click Suppression**: Clicked suggestions are recorded in the session store. If the same topic reappears, it must carry a valid `novelty_basis` keyword (e.g., "new constraint", "resolved") to pass the filter.
+3. **LLM Self-Repair**: If validation fails, a repair instruction is appended and the LLM retries once before falling back to a graceful mock response.
+
+### Prompt Externalization
+All system prompts live in `prompts/` as standalone Markdown files. This means:
+- Prompts can be tuned without touching Python code.
+- Prompt changes are tracked in git history.
+- The Settings panel allows runtime override of prompt text for rapid experimentation.
+
+---
+
 ## ⚙️ Configuration
 
-The system supports a **Hybrid Configuration Model**:
-1.  **Static (.env)**: Pre-configure API keys and environment variables in the root directory.
-2.  **Dynamic (UI Shell)**: The application features a built-in **Settings Panel** (⚙️ button) to update API keys and prompt parameters at runtime without restarting the server.
+The system supports **two configuration methods**:
+
+### 1. Runtime UI (Settings Panel)
+Click ⚙️ Settings in the app to configure:
+- **Groq API Key** — paste your key here (never hardcoded)
+- **Live Suggestion Prompt** — editable system prompt for suggestion generation
+- **Detail Answer Prompt** — editable system prompt for click-expansion
+- **Chat Prompt** — editable system prompt for free-form questions
+- **Context Window (Live)** — seconds of recent transcript for suggestions (default: 30s)
+- **Context Window (Chat)** — seconds of context for detailed answers (default: 180s)
+
+All settings persist in `localStorage` across page refreshes.
+
+### 2. Environment Variables (.env)
+```env
+GROQ_API_KEY=gsk_your_key_here
+PORT=5000
+```
+
+---
+
+## 📂 Export & Intelligence Report
+
+Clicking **"Export Session"** triggers a two-phase process:
+
+1. **Phase 1 — AI Intelligence Report**: The full transcript, suggestion history, and chat log are sent to `openai/gpt-oss-120b` which generates a structured meeting memory containing:
+   - **Key Decisions** made during the meeting
+   - **Action Items** with owner names and deadlines
+   - **Important Facts** cited in the discussion
+   - **Bullet-Point Summary** of the conversation
+   - **Open Questions** that remain unresolved
+   - **Meeting Sentiment** assessment
+   - **Follow-up Email Draft** ready to copy-paste
+
+2. **Phase 2 — Bundle**: The intelligence report is packaged alongside the raw transcript, all suggestion batches (with timestamps), and the full chat history into a single **JSON** file.
+
+If the report API fails, the export degrades gracefully — raw data is still downloaded with `intelligence_report: null`.
+
+---
+
+## 🎭 Simulation Mode
+
+When no API key is configured, the system enters **Simulation Mode**:
+- A scripted meeting scenario plays automatically (scaling, GDPR, task assignment)
+- Choreographed pacing: 1s transcript delay → 1.5s "AI thinking" delay
+- Suggestion cards are pre-mapped to transcript content for a coherent demo
+- The intelligence report generates a realistic mock with sample action items
+
+This allows evaluators to experience the full UI flow without consuming API credits.
+
+---
+
+## 🏗 Full-Stack Engineering Details
+
+### Audio Capture & Chunking
+- **Adaptive VAD (Voice Activity Detection)**: Custom client-side `AnalyserNode` monitors audio RMS levels in real-time. Speech triggers recording; silence triggers flush.
+- **Dual Flush Strategy**: Silence-based (4.5s pause) OR time-based (28s max), whichever comes first, ensuring natural sentence boundaries without infinite buffering.
+- **Whisper Context Priming**: The last 10 words of the previous transcript are passed as a `prompt` parameter to Whisper, improving punctuation and reducing hallucination at chunk boundaries.
+- **Hallucination Filtering**: Common Whisper artifacts ("Thank you", "Yeah", "You") are filtered client-side before they pollute the suggestion engine.
+
+### Error Handling & Resilience
+- **Strict → Best-Effort Fallback**: The suggestion engine first attempts `json_schema` strict mode. If the model returns a 400 (schema incompatibility), it falls back to `json_object` mode automatically.
+- **LLM Self-Repair Loop**: On validation failure, a repair instruction is appended and the LLM retries once before engaging the mock fallback.
+- **Rate Limit Awareness**: 401 and 429 errors surface user-friendly alerts with specific guidance (check key vs. wait and retry).
+- **Export Resilience**: Intelligence report generation failure doesn't block the raw data export.
+
+### Audio Overlap Deduplication
+Whisper's 30s window can produce overlapping content when chunks are flushed at natural speech boundaries. The `SessionStore` maintains a sliding window of recent transcript texts and rejects exact duplicates, preventing the LLM from seeing "The quick quick brown fox."
 
 ---
 
 ## ✅ Quality Assurance
-Run the logical validation suite to verify phase detection and novelty filtering:
-```bash
-python -m scripts.verify_logic
-```
 
-Detailed test rubrics and simulation scripts can be found in `docs/testing/`.
+### Automated
+```bash
+python scripts/verify_logic.py
+```
+Validates phase detection, schema compliance, and anti-repetition across 3 golden scenarios.
+
+### Manual Audit
+See `docs/testing/` for:
+- `voice_audit_session.md` — A spoken script to test live with mic
+- `validation_suite.md` — Rubric for recency bias, novelty recovery, diversity
+- `report_intelligence_audit.md` — Checklist for intelligence report grounding
+
+---
+
+## 📋 Requirement Compliance Matrix
+
+| Requirement | Status | Implementation |
+|---|---|---|
+| Start/stop mic | ✅ | Toggle button with blinking indicator |
+| Transcript chunks ~30s | ✅ | Adaptive VAD with 4.5s silence / 28s max flush |
+| Auto-scroll transcript | ✅ | `useRef` + `scrollIntoView` on update |
+| Auto-refresh suggestions ~30s | ✅ | Configurable interval with Auto-Refresh toggle |
+| Manual refresh button | ✅ | "Manual Refresh" button in suggestions column |
+| Exactly 3 suggestions per batch | ✅ | Schema-enforced via `contracts/` + prompt instruction |
+| New batch at top, older below | ✅ | `batches` array prepends new, renders with dividers |
+| Tappable cards with useful preview | ✅ | Cards show type badge + preview text; click expands |
+| Mixed suggestion types by context | ✅ | Dual-pass routing ensures type diversity per batch |
+| Click → detailed answer in chat | ✅ | `handleSuggestionClick` → `/api/suggestions/click` |
+| Users can type questions | ✅ | Chat input bar with `/api/chat/message` endpoint |
+| One continuous chat per session | ✅ | In-memory, no persistence across reload |
+| Export (transcript + suggestions + chat + timestamps) | ✅ | JSON export with all data + intelligence report |
+| Groq API: whisper-large-v3 + gpt-oss-120b | ✅ | Hardcoded model strings in `server.py` |
+| Settings: API key field | ✅ | Settings panel with runtime key input |
+| Settings: Editable prompts + context windows | ✅ | Live, Detail, and Chat prompts + 2 context windows |
+| Deployed public URL | 🔲 | Ready for Vercel (frontend) + Render (backend) |
