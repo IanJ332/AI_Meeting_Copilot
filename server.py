@@ -152,11 +152,11 @@ def refresh_suggestions():
             # Mapping specific suggestions to transcript indices for 'hand-in-glove' demo
             scenario = [
                 {
-                    "text": "The main challenge for TwinMind right now is scaling to millions of users while maintaining low latency.",
+                    "text": "The main challenge for the Real-time AI Copilot right now is scaling to millions of users while maintaining low latency.",
                     "suggestions": [
-                        {"id": "s1", "type": "question", "preview": "How do we handle Groq rate limits during peak usage?", "topic": "infrastructure"},
+                        {"id": "s1", "type": "question", "preview": "How do we handle API rate limits during peak usage?", "topic": "infrastructure"},
                         {"id": "s2", "type": "insight", "preview": "Latency over 2sec significantly drops user engagement.", "topic": "performance"},
-                        {"id": "s3", "type": "fact_check", "preview": "Check Groq's burst capacity for Whisper-V3.", "topic": "scaling"}
+                        {"id": "s3", "type": "fact_check", "preview": "Check API's burst capacity for Whisper-V3.", "topic": "scaling"}
                     ]
                 },
                 {

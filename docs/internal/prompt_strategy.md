@@ -1,6 +1,6 @@
-# TwinMind Prompt Engineering Strategy
+# Real-time AI Copilot Prompt Engineering Strategy
 
-This document outlines the architectural decisions and prompt strategies used to achieve high-quality, context-aware assistance in the TwinMind AI pipeline.
+This document outlines the architectural decisions and prompt strategies used to achieve high-quality, context-aware assistance in the Real-time AI Copilot AI pipeline.
 
 ## 1. Multi-Pass Suggestion Pipeline
 

@@ -1,12 +1,16 @@
 import os
-from .session_store import SessionStore
-from .suggestion_wrapper import SuggestionWrapper
+import sys
+# Add project root to sys.path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from harness.session_store import SessionStore
+from harness.suggestion_wrapper import SuggestionWrapper
 
 def run_scenarios():
     api_key = os.environ.get("GROQ_API_KEY", "")
     wrapper = SuggestionWrapper(api_key=api_key)
     
-    print("=== TwinMind Golden Scenario Runner ===\n")
+    print("=== Real-time AI Copilot Golden Scenario Runner ===\n")
     
     scenarios = [
         {

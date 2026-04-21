@@ -1,4 +1,4 @@
-# TwinMind Live Simulation Script
+# Real-time AI Copilot Live Simulation Script
 
 Follow this script to test the end-to-end flow of the application. Paste each block into the "Mock Transcript" flow or speak it aloud if the mic is active.
 

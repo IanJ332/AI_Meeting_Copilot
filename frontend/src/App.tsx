@@ -53,7 +53,7 @@ function App() {
   // Settings
   const [mockCadenceSeconds, setMockCadenceSeconds] = useState(30);
   const [settings, setSettings] = useState(() => {
-    const saved = localStorage.getItem('twinmind_settings');
+    const saved = localStorage.getItem('copilot_settings');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -73,7 +73,7 @@ function App() {
 
   // Persist settings to localStorage
   useEffect(() => {
-    localStorage.setItem('twinmind_settings', JSON.stringify(settings));
+    localStorage.setItem('copilot_settings', JSON.stringify(settings));
   }, [settings]);
 
   // 5. Scripted Simulation Engine (Mock Mode Auto-Playback)
@@ -455,7 +455,7 @@ function App() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `twinmind-session-${Date.now()}.json`;
+      a.download = `meeting-session-${Date.now()}.json`;
       a.click();
       URL.revokeObjectURL(url);
     } catch(err) {
@@ -517,7 +517,7 @@ function App() {
             <span style={{display:'flex', alignItems:'center', gap:'0.5rem'}}>
               Live Transcript
               {!settings.groqApiKey && (
-                <span className="badge" style={{background: '#f59e0b', color: 'white', fontSize: '0.65rem', padding: '0.1rem 0.4rem'}}>MOCK MODE</span>
+                <span className="badge" style={{background: '#f59e0b', color: 'white', fontSize: '0.65rem', padding: '0.1rem 0.4rem'}}>SIMULATION MODE</span>
               )}
             </span>
             <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center'}}>
@@ -645,7 +645,7 @@ function App() {
         <div className="modal-overlay">
           <div className="modal-content column">
             <div className="column-header" style={{height: 'auto', padding: '1rem 1.5rem'}}>
-              <span>TwinMind Settings (Shell)</span>
+              <span>Copilot Settings</span>
               <button className="danger" onClick={() => setShowSettings(false)}>X</button>
             </div>
             <div className="column-body">

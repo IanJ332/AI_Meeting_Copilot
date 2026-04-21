@@ -1,4 +1,4 @@
-# TwinMind Prompt Engineering Validation Suite
+# Real-time AI Copilot Prompt Engineering Validation Suite
 
 Use this suite to audit the "roundedness" of the prompt engineering before final submission. These tests specifically target the logical edge cases in the suggestion and chat engines.
 

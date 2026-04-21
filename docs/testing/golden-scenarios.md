@@ -1,4 +1,4 @@
-# Golden Scenarios for TwinMind Live Suggestions
+# Golden Scenarios for Real-time AI Copilot Live Suggestions
 
 This file defines fixed transcript scenarios for evaluating the live suggestion engine.
 
