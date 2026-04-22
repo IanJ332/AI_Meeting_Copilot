@@ -22,6 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY server.py .
 COPY harness/ ./harness/
 COPY contracts/ ./contracts/
+COPY prompts/ ./prompts/
 
 # Expose the server port
 EXPOSE 5000
