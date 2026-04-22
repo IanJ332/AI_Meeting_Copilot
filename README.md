@@ -16,8 +16,8 @@ You are able to use with Grop API here [AI Meeting Copilot](https://ai-meeting-c
 
 ### Option 1: Docker
 ```bash
-git clone <repo-url>
-cd <repo-folder>
+git clone https://github.com/IanJ332/AI_Meeting_Copilot.git
+cd AI_Meeting_Copilot
 docker-compose up
 ```
 Open [http://localhost:5173](http://localhost:5173). Paste your Groq API key in ⚙️ Settings.
