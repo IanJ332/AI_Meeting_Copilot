@@ -23,11 +23,12 @@ body {
   height: 100vh;
 }
 
+/* A.11: Responsive gap + padding */
 .app-container {
   display: flex;
   height: 100vh;
-  gap: 1.5rem;
-  padding: 1.5rem;
+  gap: clamp(0.5rem, 1vw, 1.5rem);
+  padding: clamp(0.5rem, 1vw, 1.5rem);
 }
 
 /* 3 column grid */
@@ -107,11 +108,32 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* Ghost button (used for reset) */
+button.ghost {
+  background: transparent;
+  border-color: rgba(255,255,255,0.15);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+button.ghost:hover {
+  background: rgba(255,255,255,0.06);
+  color: var(--text-primary);
+}
+
 /* Specifics */
 .transcript-line {
   margin-bottom: 0.5rem;
   line-height: 1.6;
   font-size: 0.95rem;
+}
+
+/* A.10: New transcript line highlight */
+.transcript-line:last-of-type {
+  animation: newLine 2s ease-out;
+}
+@keyframes newLine {
+  0% { background: rgba(124, 58, 237, 0.1); border-radius: 6px; }
+  100% { background: transparent; }
 }
 
 .timestamp {
@@ -126,11 +148,14 @@ button:disabled {
   color: #a78bfa;
 }
 
-/* Suggestion Card */
+/* ============================================ */
+/* A.3 + A.4: Suggestion Card Redesign         */
+/* ============================================ */
 .suggestion-card {
   background: linear-gradient(145deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%);
   border: 1px solid rgba(255,255,255,0.08);
-  padding: 1.2rem;
+  border-left: 3px solid rgba(255,255,255,0.1); /* Default, overridden per type */
+  padding: 1rem 1.2rem;
   border-radius: 12px;
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -153,25 +178,50 @@ button:disabled {
   box-shadow: 0 8px 20px rgba(0,0,0,0.3);
 }
 
+/* A.4: Pill badge type labels */
 .suggestion-type {
-  font-size: 0.75rem;
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 4px;
+  font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #c4b5fd;
-  margin-bottom: 0.6rem;
+  margin-bottom: 0.5rem;
   font-weight: 700;
 }
 
-.type-question { color: #60a5fa; }        /* Blue */
-.type-answer { color: #10b981; }          /* Green */
-.type-clarification { color: #f59e0b; }   /* Yellow */
-.type-fact_check { color: #ef4444; }      /* Red */
-.type-insight { color: #d946ef; }         /* Fuchsia / Purple */
-.type-summary { color: #64748b; }         /* Slate */
+/* A.2 + A.3 + A.4: Per-type colors — text, pill background, and card left border */
+.type-question      { color: #60a5fa; background: rgba(96,165,250,0.12); }
+.type-answer        { color: #10b981; background: rgba(16,185,129,0.12); }
+.type-clarification { color: #f59e0b; background: rgba(245,158,11,0.12); }
+.type-fact_check    { color: #ef4444; background: rgba(239,68,68,0.12); }
+.type-insight       { color: #d946ef; background: rgba(217,70,239,0.12); }
+.type-summary       { color: #94a3b8; background: rgba(148,163,184,0.12); }
+.type-tradeoff      { color: #f97316; background: rgba(249,115,22,0.12); }
+.type-next_step     { color: #06b6d4; background: rgba(6,182,212,0.12); }
+
+/* A.3: Left border colors via :has() */
+.suggestion-card:has(.type-question)      { border-left-color: #60a5fa; }
+.suggestion-card:has(.type-answer)        { border-left-color: #10b981; }
+.suggestion-card:has(.type-clarification) { border-left-color: #f59e0b; }
+.suggestion-card:has(.type-fact_check)    { border-left-color: #ef4444; }
+.suggestion-card:has(.type-insight)       { border-left-color: #d946ef; }
+.suggestion-card:has(.type-summary)       { border-left-color: #94a3b8; }
+.suggestion-card:has(.type-tradeoff)      { border-left-color: #f97316; }
+.suggestion-card:has(.type-next_step)     { border-left-color: #06b6d4; }
 
 .suggestion-preview {
   line-height: 1.5;
   font-size: 0.95rem;
+}
+
+/* A.5: why_now metadata line */
+.suggestion-meta {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  margin-top: 0.35rem;
+  opacity: 0.65;
+  font-style: italic;
 }
 
 .batch-divider {
@@ -196,6 +246,9 @@ button:disabled {
   font-weight: 500;
 }
 
+/* ============================================ */
+/* A.6: Chat message styling                    */
+/* ============================================ */
 .chat-message {
   padding: 1.2rem;
   border-radius: 12px;
@@ -211,9 +264,36 @@ button:disabled {
   border-color: rgba(124, 58, 237, 0.3);
 }
 
+/* A.6: Assistant bubble left accent */
+.chat-message.assistant {
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 3px solid rgba(124, 58, 237, 0.35);
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
 @keyframes slideIn {
   from { opacity: 0; transform: translateY(15px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* A.7: Typing indicator */
+.typing-indicator {
+  display: flex;
+  gap: 4px;
+  padding: 0.5rem 0;
+}
+.typing-indicator span {
+  width: 6px;
+  height: 6px;
+  background: var(--text-secondary);
+  border-radius: 50%;
+  animation: typingBounce 1.4s infinite ease-in-out both;
+}
+.typing-indicator span:nth-child(2) { animation-delay: 0.16s; }
+.typing-indicator span:nth-child(3) { animation-delay: 0.32s; }
+@keyframes typingBounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
 }
 
 /* Scrollbar formatting */
@@ -227,7 +307,7 @@ button:disabled {
   background: rgba(255,255,255,0.2);
 }
 
-/* Phase D Components */
+/* Blinking Mic Dot */
 .blinking-dot {
   width: 10px;
   height: 10px;
@@ -260,6 +340,86 @@ button:disabled {
   font-weight: bold;
 }
 
+/* ============================================ */
+/* A.8: Toast notifications                     */
+/* ============================================ */
+.toast {
+  position: fixed;
+  top: 1.5rem;
+  right: 1.5rem;
+  padding: 0.8rem 1.2rem;
+  border-radius: 10px;
+  z-index: 9999;
+  font-size: 0.85rem;
+  font-weight: 500;
+  animation: slideIn 0.3s ease-out;
+  backdrop-filter: blur(12px);
+  max-width: 420px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.toast.error {
+  background: rgba(239,68,68,0.15);
+  border: 1px solid rgba(239,68,68,0.3);
+  color: #fca5a5;
+}
+.toast.info {
+  background: rgba(16,185,129,0.15);
+  border: 1px solid rgba(16,185,129,0.3);
+  color: #6ee7b7;
+}
+.toast-dismiss {
+  cursor: pointer;
+  opacity: 0.6;
+  margin-left: auto;
+  font-size: 0.9rem;
+}
+.toast-dismiss:hover { opacity: 1; }
+
+/* ============================================ */
+/* A.9: Status footer                           */
+/* ============================================ */
+.status-footer {
+  padding: 0.5rem 1rem;
+  background: rgba(0,0,0,0.2);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-align: center;
+  border-top: 1px solid var(--border-color);
+}
+
+/* ============================================ */
+/* A.12: Skeleton loading cards                 */
+/* ============================================ */
+.skeleton-card {
+  height: 76px;
+  border-radius: 12px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.03) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border-color);
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ============================================ */
+/* A.13: Export button pulsing animation        */
+/* ============================================ */
+button.exporting {
+  animation: exportPulse 1.5s ease-in-out infinite;
+}
+@keyframes exportPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.4); }
+  50% { box-shadow: 0 0 15px 3px rgba(16,185,129,0.2); }
+}
+
+/* ============================================ */
+/* B.6 + Settings Modal                         */
+/* ============================================ */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -278,17 +438,49 @@ button:disabled {
   background: #111318;
   box-shadow: 0 10px 40px rgba(0,0,0,0.5);
   border: 1px solid var(--border-color);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+/* B.1: Section grouping */
+.settings-section {
+  padding-top: 1rem;
+  margin-top: 0.5rem;
+  border-top: 1px solid var(--border-color);
+}
+.settings-section:first-of-type {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+.settings-section-title {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  font-weight: 700;
+  margin-bottom: 0.75rem;
 }
 
 label {
   display: block;
   font-size: 0.8rem;
   color: var(--text-secondary);
-  margin-bottom: 0.5rem;
-  margin-top: 0.5rem;
+  margin-bottom: 0.3rem;
+  margin-top: 0.75rem;
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+/* B.3: Help text */
+.settings-help {
+  font-size: 0.7rem;
+  color: rgba(255,255,255,0.3);
+  margin-top: 0.15rem;
+  margin-bottom: 0.4rem;
+  line-height: 1.4;
+  font-style: italic;
 }
 
 .settings-input {
@@ -308,6 +500,31 @@ label {
   outline: none;
   border-color: var(--accent);
   background: rgba(0,0,0,0.4);
+}
+
+/* B.2: API key field wrapper */
+.api-key-wrapper {
+  position: relative;
+  display: flex;
+  gap: 0.5rem;
+}
+.api-key-wrapper .settings-input {
+  flex: 1;
+}
+.api-key-toggle {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+.api-key-toggle:hover {
+  background: rgba(255,255,255,0.12);
+  color: var(--text-primary);
 }
 
 .chat-role {

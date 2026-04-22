@@ -14,6 +14,7 @@ interface Suggestion {
   id: string;
   type: string;
   preview: string;
+  why_now?: string;
   topic_signature: string;
   expand_seed?: string;
 }
@@ -49,26 +50,47 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const isRefreshing = useRef(false);
-  
-  // Settings
+
+  // A.8: Toast notifications (replaces alert())
+  const [toast, setToast] = useState<{msg: string, type: 'error' | 'info'} | null>(null);
+  useEffect(() => {
+    if (toast) {
+      const t = setTimeout(() => setToast(null), 5000);
+      return () => clearTimeout(t);
+    }
+  }, [toast]);
+
+  // B.2: API key show/hide toggle
+  const [showApiKey, setShowApiKey] = useState(false);
+
+  // B.5: Settings with version-based migration
+  const SETTINGS_VERSION = 2;
+  const DEFAULT_SETTINGS = {
+    _version: SETTINGS_VERSION,
+    groqApiKey: '',
+    livePrompt: 'Prioritize the most recent 30s. Surface urgent blockers first. Be piercingly direct — max 6 words per card.',
+    detailPrompt: 'You are an expert meeting analyst. Ground every claim in the transcript. Use bullets. Max 100 words.',
+    chatPrompt: 'You are a meeting copilot. Answer questions using transcript context. Be concise and accurate. Max 5 bullets.',
+    liveContextWindow: 30,
+    detailContextWindow: 180
+  };
+
   const [mockCadenceSeconds, setMockCadenceSeconds] = useState(30);
   const [settings, setSettings] = useState(() => {
     const saved = localStorage.getItem('copilot_settings');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        // B.5: Migrate stale defaults if version is outdated
+        if (!parsed._version || parsed._version < SETTINGS_VERSION) {
+          return { ...DEFAULT_SETTINGS, groqApiKey: parsed.groqApiKey || '' };
+        }
+        return parsed;
       } catch (e) {
         console.error("Failed to parse settings", e);
       }
     }
-    return {
-      groqApiKey: '',
-      livePrompt: 'Prioritize the most recent 30s. Surface urgent blockers first. Be piercingly direct — max 6 words per card.',
-      detailPrompt: 'You are an expert meeting analyst. Ground every claim in the transcript. Use bullets. Max 100 words.',
-      chatPrompt: 'You are a meeting copilot. Answer questions using transcript context. Be concise and accurate. Max 5 bullets.',
-      liveContextWindow: 30,
-      detailContextWindow: 180
-    };
+    return { ...DEFAULT_SETTINGS };
   });
 
   // Persist settings to localStorage
@@ -205,9 +227,9 @@ function App() {
                 if (data.error) {
                   console.error("Transcription Error:", data.error);
                   if (data.error.includes("401") || data.error.includes("API Key")) {
-                    alert("⚠️ Authentication Error: Your Groq API Key is invalid or expired. Please check Settings.");
+                    setToast({msg: '⚠️ Authentication Error: Groq API Key is invalid or expired. Check Settings.', type: 'error'});
                   } else if (data.error.includes("429")) {
-                    alert("⚠️ Rate Limit: Groq API is throttled. Please wait a moment.");
+                    setToast({msg: '⚠️ Rate Limit: Groq API is throttled. Wait a moment and retry.', type: 'error'});
                   }
                   return;
                 }
@@ -249,7 +271,7 @@ function App() {
               .catch(err => {
                 console.error("Audio upload failed", err);
                 // Only alert on critical network/auth issues, not every chunk retry
-                if (micActive) alert("⚠️ Critical Connection Error: Could not reach the AI server.");
+                if (micActive) setToast({msg: '⚠️ Connection Error: Could not reach the AI server.', type: 'error'});
               });
             }
           };
@@ -418,8 +440,8 @@ function App() {
       
       if (!res.ok) {
          const errData = await res.json().catch(() => ({}));
-         if (res.status === 401) alert("⚠️ Authentication Error: Your Groq API Key is invalid.");
-         else alert("⚠️ Expansion Failed: " + (errData.error || "Connection issue"));
+         if (res.status === 401) setToast({msg: '⚠️ Authentication Error: Your Groq API Key is invalid.', type: 'error'});
+         else setToast({msg: '⚠️ Expansion Failed: ' + (errData.error || 'Connection issue'), type: 'error'});
          return;
       }
 
@@ -498,7 +520,7 @@ function App() {
       URL.revokeObjectURL(url);
     } catch(err) {
       console.error("Export failed", err);
-      alert("Failed to export session data.");
+      setToast({msg: '⚠️ Failed to export session data.', type: 'error'});
     } finally {
       setIsExporting(false);
     }
@@ -550,9 +572,17 @@ function App() {
 
   return (
     <>
+      {/* A.8: Toast notification */}
+      {toast && (
+        <div className={`toast ${toast.type}`}>
+          <span>{toast.msg}</span>
+          <span className="toast-dismiss" onClick={() => setToast(null)}>✕</span>
+        </div>
+      )}
+
       <div className="app-container">
         {/* LEFT COLUMN: Transcript */}
-        <div className="column">
+        <div className="column" style={{flex: 0.95}}>
           <div className="column-header">
             <span style={{display:'flex', alignItems:'center', gap:'0.5rem'}}>
               Live Transcript
@@ -578,13 +608,13 @@ function App() {
             ))}
             <div ref={transcriptEndRef} />
           </div>
-          <div style={{padding: '0.5rem 1rem', background: 'rgba(0,0,0,0.2)', fontSize: '0.8rem', color: '#9aa0a6'}}>
-            Whisper V3 Processing Cadence: Smart VAD (4.5s Pause / 28s Max)
+          <div className="status-footer">
+            {micActive ? '🎙 Listening · auto-chunking ~30s' : '🔇 Mic inactive'}
           </div>
         </div>
 
         {/* MIDDLE COLUMN: Suggestions */}
-        <div className="column">
+        <div className="column" style={{flex: 1.15}}>
           <div className="column-header">
             <span style={{display:'flex', alignItems:'center', gap:'0.5rem'}}>
               Live Suggestions 
@@ -608,7 +638,15 @@ function App() {
             </div>
           )}
           <div className="column-body">
-            {batches.length === 0 && <div className="placeholder-text">{transcript.length === 0 ? "Not ready. Add transcript first." : "Click Refresh to generate suggestions based on recent context..."}</div>}
+            {/* A.12: Skeleton loading cards */}
+            {isLoading && batches.length === 0 && (
+              <>
+                <div className="skeleton-card"></div>
+                <div className="skeleton-card"></div>
+                <div className="skeleton-card"></div>
+              </>
+            )}
+            {batches.length === 0 && !isLoading && <div className="placeholder-text">{transcript.length === 0 ? "Not ready. Add transcript first." : "Click Refresh to generate suggestions based on recent context..."}</div>}
             {batches.map((batch, idx) => (
               <div key={idx} style={{marginBottom: '1rem'}}>
                 {idx !== 0 && (
@@ -630,6 +668,7 @@ function App() {
                   >
                     <div className={`suggestion-type type-${s.type}`}>{s.type.replace('_', ' ')}</div>
                     <div className="suggestion-preview">{s.preview}</div>
+                    {s.why_now && <div className="suggestion-meta">{s.why_now}</div>}
                   </div>
                 ))}
               </div>
@@ -638,12 +677,12 @@ function App() {
         </div>
 
         {/* RIGHT COLUMN: Chat */}
-        <div className="column">
+        <div className="column" style={{flex: 0.97}}>
           <div className="column-header">
             <span>Detailed Chat Dashboard</span>
             <div style={{display: 'flex', gap: '0.5rem'}}>
               <button onClick={() => setShowSettings(true)}>⚙️ Settings</button>
-              <button className="primary" onClick={exportSession} disabled={isExporting} style={{background: '#10b981', borderColor: '#10b981'}}>
+              <button className={`primary ${isExporting ? 'exporting' : ''}`} onClick={exportSession} disabled={isExporting} style={{background: '#10b981', borderColor: '#10b981'}}>
                 {isExporting ? '⏳ Generating Report...' : '⬇ Export Session'}
               </button>
             </div>
@@ -660,6 +699,15 @@ function App() {
                 </div>
               </div>
             ))}
+            {/* A.7: Typing indicator */}
+            {isLoading && (
+              <div className="chat-message assistant">
+                <strong className="chat-role assistant">ASSISTANT</strong>
+                <div className="typing-indicator">
+                  <span></span><span></span><span></span>
+                </div>
+              </div>
+            )}
             <div ref={chatEndRef} />
           </div>
 
@@ -687,69 +735,100 @@ function App() {
         </div>
       </div>
 
-      {/* SETTINGS MODAL */}
+      {/* SETTINGS MODAL — B.1-B.4 Overhaul */}
       {showSettings && (
         <div className="modal-overlay">
           <div className="modal-content column">
             <div className="column-header" style={{height: 'auto', padding: '1rem 1.5rem'}}>
               <span>Copilot Settings</span>
-              <button className="danger" onClick={() => setShowSettings(false)}>X</button>
+              <button className="danger" onClick={() => setShowSettings(false)}>✕</button>
             </div>
             <div className="column-body">
-               <label>Groq API Key (.env or runtime)</label>
-               <input 
-                 className="settings-input" 
-                 type="text" 
-                 value={settings.groqApiKey} 
-                 onChange={e => setSettings({...settings, groqApiKey: e.target.value})} 
-               />
-               
-               <label>Mock Transcript Cadence (Seconds)</label>
-               <input 
-                 className="settings-input" 
-                 type="number" 
-                 value={mockCadenceSeconds} 
-                 onChange={e => setMockCadenceSeconds(Number(e.target.value))} 
-               />
-
-               <label>Live Suggestion Prompt</label>
-               <textarea 
-                 className="settings-input"
-                 rows={3}
-                 value={settings.livePrompt}
-                 onChange={e => setSettings({...settings, livePrompt: e.target.value})}
-               />
-
-               <label>Detail Answer Prompt</label>
-               <textarea 
-                 className="settings-input"
-                 rows={2}
-                 value={settings.detailPrompt}
-                 onChange={e => setSettings({...settings, detailPrompt: e.target.value})}
-               />
-
-               <label>Chat Prompt (Free-form Questions)</label>
-               <textarea 
-                 className="settings-input"
-                 rows={2}
-                 value={settings.chatPrompt}
-                 onChange={e => setSettings({...settings, chatPrompt: e.target.value})}
-               />
-
-               <div style={{display:'flex', gap:'1rem'}}>
-                 <div style={{flex:1}}>
-                   <label>Context Window (Live, secs)</label>
-                   <input className="settings-input" type="number" value={settings.liveContextWindow} onChange={e => setSettings({...settings, liveContextWindow: Number(e.target.value)})} />
-                 </div>
-                 <div style={{flex:1}}>
-                   <label>Context Window (Chat, secs)</label>
-                   <input className="settings-input" type="number" value={settings.detailContextWindow} onChange={e => setSettings({...settings, detailContextWindow: Number(e.target.value)})} />
+               {/* B.1: Section 1 — Connection */}
+               <div className="settings-section">
+                 <div className="settings-section-title">⚡ Connection</div>
+                 <label>Groq API Key</label>
+                 <div className="settings-help">Paste your Groq key here. Never shared — redacted on export.</div>
+                 <div className="api-key-wrapper">
+                   <input 
+                     className="settings-input" 
+                     type={showApiKey ? "text" : "password"}
+                     value={settings.groqApiKey} 
+                     onChange={e => setSettings({...settings, groqApiKey: e.target.value})} 
+                     placeholder="gsk_..."
+                   />
+                   <button type="button" className="api-key-toggle" onClick={() => setShowApiKey(!showApiKey)}>
+                     {showApiKey ? '🙈 Hide' : '👁 Show'}
+                   </button>
                  </div>
                </div>
 
-               <div style={{textAlign: 'right', marginTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1rem'}}>
-                  <span style={{marginRight: '1rem', color: '#10b981', fontSize: '0.85rem'}}>⚙️ Shell state saved locally</span>
-                  <button className="primary" onClick={() => setShowSettings(false)}>Done</button>
+               {/* B.1: Section 2 — Prompts */}
+               <div className="settings-section">
+                 <div className="settings-section-title">🎯 Prompts</div>
+                 
+                 <label>Live Suggestion Prompt</label>
+                 <div className="settings-help">Appended to AI suggestion generation. Use to prioritize topics or card types.</div>
+                 <textarea 
+                   className="settings-input"
+                   rows={3}
+                   value={settings.livePrompt}
+                   onChange={e => setSettings({...settings, livePrompt: e.target.value})}
+                 />
+
+                 <label>Detail Answer Prompt</label>
+                 <div className="settings-help">System instruction for click-to-expand responses. Controls tone and depth.</div>
+                 <textarea 
+                   className="settings-input"
+                   rows={2}
+                   value={settings.detailPrompt}
+                   onChange={e => setSettings({...settings, detailPrompt: e.target.value})}
+                 />
+
+                 <label>Chat Prompt</label>
+                 <div className="settings-help">System instruction for free-form Q&A in the chat panel.</div>
+                 <textarea 
+                   className="settings-input"
+                   rows={2}
+                   value={settings.chatPrompt}
+                   onChange={e => setSettings({...settings, chatPrompt: e.target.value})}
+                 />
+               </div>
+
+               {/* B.1: Section 3 — Tuning */}
+               <div className="settings-section">
+                 <div className="settings-section-title">⚙️ Tuning</div>
+                 <div style={{display:'flex', gap:'1rem'}}>
+                   <div style={{flex:1}}>
+                     <label>Context Window (Live)</label>
+                     <div className="settings-help">Seconds of recent transcript for suggestions.</div>
+                     <input className="settings-input" type="number" value={settings.liveContextWindow} onChange={e => setSettings({...settings, liveContextWindow: Number(e.target.value)})} />
+                   </div>
+                   <div style={{flex:1}}>
+                     <label>Context Window (Chat)</label>
+                     <div className="settings-help">Seconds of transcript context for detailed answers.</div>
+                     <input className="settings-input" type="number" value={settings.detailContextWindow} onChange={e => setSettings({...settings, detailContextWindow: Number(e.target.value)})} />
+                   </div>
+                 </div>
+                 <label>Simulation Cadence (secs)</label>
+                 <div className="settings-help">Auto-refresh interval when no API key is set.</div>
+                 <input 
+                   className="settings-input" 
+                   type="number" 
+                   value={mockCadenceSeconds} 
+                   onChange={e => setMockCadenceSeconds(Number(e.target.value))} 
+                 />
+               </div>
+
+               {/* Footer with Reset + Done */}
+               <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1rem'}}>
+                  <button className="ghost" onClick={() => { setSettings({...DEFAULT_SETTINGS}); setToast({msg: '↩ Settings reset to defaults.', type: 'info'}); }}>
+                    ↩ Reset Defaults
+                  </button>
+                  <div style={{display: 'flex', alignItems: 'center', gap: '1rem'}}>
+                    <span style={{color: '#10b981', fontSize: '0.8rem'}}>✓ Auto-saved locally</span>
+                    <button className="primary" onClick={() => setShowSettings(false)}>Done</button>
+                  </div>
                </div>
             </div>
           </div>

@@ -83,6 +83,10 @@ def generate_detailed_answer(handoff_obj, session_data, settings, api_key, chat_
                 dynamic_rule = "Explain the term clearly for a beginner."
             elif suggestion_type == "summary":
                 dynamic_rule = "Provide a tight bulleted summary of this conclusion."
+            elif suggestion_type == "tradeoff":
+                dynamic_rule = "Compare both options, name one recommendation, cite transcript evidence."
+            elif suggestion_type == "next_step":
+                dynamic_rule = "List each action item with owner. Include deadlines if mentioned."
 
             messages = [
                 {"role": "system", "content": f"{detail_prompt}\n\n[CONTEXTUAL TRIGGER]: {dynamic_rule}\n\nCRITICAL BREVITY RULE: Bullets ONLY. Max 5 bullets, each max 20 words. No headers. No tables. Under 100 words total.\n\n{context_text}"},
@@ -162,27 +166,27 @@ def refresh_suggestions():
             # Mapping specific suggestions to transcript indices for 'hand-in-glove' demo
             scenario = [
                 {
-                    "text": "The main challenge for the Real-time AI Copilot right now is scaling to millions of users while maintaining low latency.",
+                    "text": "database strategy",
                     "suggestions": [
-                        {"id": "s1", "type": "question", "preview": "How do we handle API rate limits during peak usage?", "topic": "infrastructure"},
-                        {"id": "s2", "type": "insight", "preview": "Latency over 2sec significantly drops user engagement.", "topic": "performance"},
-                        {"id": "s3", "type": "fact_check", "preview": "Check API's burst capacity for Whisper-V3.", "topic": "scaling"}
+                        {"id": "s1", "type": "tradeoff", "preview": "RDS vs serverless PostgreSQL", "why_now": "Active comparison happening", "topic_signature": "rds_vs_serverless", "novelty_basis": "new debate", "expand_seed": "Compare cost, latency, and scaling", "confidence": 0.92},
+                        {"id": "s2", "type": "clarification", "preview": "Confirm migration deadline", "why_now": "Timeline unclear", "topic_signature": "migration_deadline", "novelty_basis": "no date given", "expand_seed": "Ask when migration must be done", "confidence": 0.88},
+                        {"id": "s3", "type": "fact_check", "preview": "RDS SOC 2 compliance status", "why_now": "Compliance mentioned", "topic_signature": "soc2_rds", "novelty_basis": "claim needs check", "expand_seed": "Verify RDS SOC 2 certification", "confidence": 0.95}
                     ]
                 },
                 {
-                    "text": "We need to ensure that the Live Suggestions are contextually varied—sometimes questions, sometimes fact-checks.",
+                    "text": "make a call",
                     "suggestions": [
-                        {"id": "s4", "type": "insight", "preview": "Varied suggestion types increase CTR by 45%.", "topic": "UX"},
-                        {"id": "s5", "type": "suggestion", "preview": "Consider adding a 'Contradiction' detector for fact-checks.", "topic": "product"},
-                        {"id": "s6", "type": "question", "preview": "What is the prompt strategy for 'Decision' detection?", "topic": "AI"}
+                        {"id": "s4", "type": "next_step", "preview": "Priya: migration script by Thu", "why_now": "Task just assigned", "topic_signature": "priya_migration", "novelty_basis": "new assignment", "expand_seed": "List all committed action items", "confidence": 0.95},
+                        {"id": "s5", "type": "summary", "preview": "Summarize billing alert steps", "why_now": "Decision concluded", "topic_signature": "billing_alert", "novelty_basis": "new budget cap", "expand_seed": "Summarize the budget monitoring plan", "confidence": 0.90},
+                        {"id": "s6", "type": "insight", "preview": "$2K cap risks underscaling", "why_now": "Budget just set", "topic_signature": "budget_risk", "novelty_basis": "capacity conflict", "expand_seed": "Analyze if 2K is enough for RDS", "confidence": 0.85}
                     ]
                 },
                 {
-                    "text": "Let's focus on the US-only pilot first before rolling out to EU regions due to GDPR complexities.",
+                    "text": "data residency",
                     "suggestions": [
-                        {"id": "s7", "type": "fact_check", "preview": "EU data residency requires separate storage shards.", "topic": "legal"},
-                        {"id": "s8", "type": "question", "preview": "When will the Frankfurt server shard be ready?", "topic": "deployment"},
-                        {"id": "s9", "type": "insight", "preview": "GDPR compliance for voice-to-text has strict TTL limits.", "topic": "compliance"}
+                        {"id": "s7", "type": "question", "preview": "Frankfurt shard timeline?", "why_now": "EU gap raised", "topic_signature": "frankfurt_shard", "novelty_basis": "new blocker", "expand_seed": "When can EU data shard be ready?", "confidence": 0.88},
+                        {"id": "s8", "type": "fact_check", "preview": "GDPR voice data TTL rules", "why_now": "Compliance gap found", "topic_signature": "gdpr_ttl", "novelty_basis": "regulatory risk", "expand_seed": "Check GDPR retention limits for audio", "confidence": 0.92},
+                        {"id": "s9", "type": "next_step", "preview": "Priya: JIRA ticket for EU", "why_now": "Follow-up assigned", "topic_signature": "eu_jira", "novelty_basis": "new P2 task", "expand_seed": "Track the EU shard as P2 in JIRA", "confidence": 0.90}
                     ]
                 }
             ]
@@ -297,13 +301,13 @@ def transcribe_audio():
     api_key = settings.get("groqApiKey") or os.environ.get("GROQ_API_KEY", "")
     
     if not api_key:
-        # SCENARIO-DRIVEN MOCKING: Return sequential phrases about scaling and privacy
+        # SCENARIO-DRIVEN MOCKING: Sequential team meeting about database migration
         mock_phrases = [
-            "The main challenge for our AI copilot right now is scaling to millions of users while maintaining low latency.",
-            "We need to ensure that the Live Suggestions are contextually varied—sometimes questions, sometimes fact-checks.",
-            "Let's focus on the US-only pilot first before rolling out to EU regions due to GDPR complexities.",
-            "Wait, I just realized Priya is out starting tomorrow.",
-            "We need someone else to own the security audit documentation."
+            "Team, we need to talk about our database strategy. Right now, we are hitting scaling bottlenecks on our self-hosted PostgreSQL. We need to decide if we should move to AWS RDS or take a risk and go with the serverless virtual PostgreSQL setup.",
+            "Okay, let's make a call. We go with AWS RDS for the production environment. Because of the SOC 2 compliance, Priya, please start the trap for migration script.",
+            "By Thursday. Alex, can you double check the billing alert so we don't blow the 2000 budgets?",
+            "Actually wait, before we commit, what about the data residency requirements for our EU customers? Should we set up a Frankfurt shard now or handle it post-launch?",
+            "Good point. Let's table EU for the MVP and revisit after the US pilot stabilizes. Priya, add a JIRA ticket to track the Frankfurt shard as P2."
         ]
         
         session_data = store.get_session(request.form.get("session_id", "default"))
