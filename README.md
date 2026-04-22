@@ -237,4 +237,4 @@ See `docs/testing/` for:
 | Groq API: whisper-large-v3 + gpt-oss-120b | ✅ | Hardcoded model strings in `server.py` |
 | Settings: API key field | ✅ | Settings panel with runtime key input |
 | Settings: Editable prompts + context windows | ✅ | Live, Detail, and Chat prompts + 2 context windows |
-| Deployed public URL | 🔲 | Ready for Vercel (frontend) + Render (backend) |
+| Deployed public URL | ✅ | Ready for Vercel (frontend) + Render (backend) |
