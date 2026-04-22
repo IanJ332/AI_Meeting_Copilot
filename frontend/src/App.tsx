@@ -826,6 +826,7 @@ function App() {
                     ↩ Reset Defaults
                   </button>
                   <div style={{display: 'flex', alignItems: 'center', gap: '1rem'}}>
+                    <a href="https://github.com/IanJ332" target="_blank" rel="noopener noreferrer" style={{color: '#9aa0a6', fontSize: '0.8rem', fontStyle: 'italic', textDecoration: 'underline'}}>@IanJ332</a>
                     <span style={{color: '#10b981', fontSize: '0.8rem'}}>✓ Auto-saved locally</span>
                     <button className="primary" onClick={() => setShowSettings(false)}>Done</button>
                   </div>
