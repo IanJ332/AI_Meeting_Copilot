@@ -828,7 +828,7 @@ function App() {
                     </button>
                   </div>
 
-                  <a href="https://github.com/IanJ332" target="_blank" rel="noopener noreferrer" style={{color: '#9aa0a6', fontSize: '0.9rem', fontStyle: 'italic', textDecoration: 'underline'}}>@IanJ332</a>
+                  <a href="https://github.com/IanJ332" target="_blank" rel="noopener noreferrer" style={{color: '#9aa0a6', fontSize: '1.05rem', fontStyle: 'italic', textDecoration: 'underline'}}>@IanJ332</a>
 
                   <div style={{display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '1rem'}}>
                     <span style={{color: '#10b981', fontSize: '0.8rem'}}>✓ Auto-saved locally</span>
