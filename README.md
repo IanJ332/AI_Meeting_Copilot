@@ -6,6 +6,12 @@ A web app that listens to live audio from the user's microphone and continuously
 
 ---
 
+## Links
+
+You are able to use with Grop API here [AI Meeting Copilot](https://ai-meeting-copilot-six.vercel.app/).
+
+---
+
 ## 🚀 Quick Start
 
 ### Option 1: Docker
